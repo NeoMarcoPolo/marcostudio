@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "marcostudio"
+version = "0.1.0"
+description = "A local creative studio. Relight your images with ComfyUI."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
+dependencies = [
+  "fastapi>=0.143,<0.144", "uvicorn>=0.54,<0.55", "httpx>=0.28,<0.29",
+  "pydantic>=2.14,<3", "pillow>=12.3,<13", "PyYAML>=6,<7",
+  "platformdirs>=4,<5", "python-multipart>=0.0.32,<0.1",
+  "comfy-sdk==0.5.0", "comfy-api-proxy==0.1.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9,<10", "pytest-asyncio>=1,<2", "build>=1,<2", "ruff>=0.15"]
+
+[project.scripts]
+marcostudio = "marcostudio.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/marcostudio"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "frontend/src/", "frontend/package*.json", "frontend/*.ts", "frontend/tsconfig.json", "frontend/index.html", "pyproject.toml", "uv.lock", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
