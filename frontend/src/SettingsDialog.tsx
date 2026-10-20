@@ -83,13 +83,11 @@ export function SettingsDialog({
         ref={dialog}
       >
         <div className="dialog-title">
-          <div className="eyebrow">YOUR LOCAL STUDIO</div>
           <button aria-label="Close settings" onClick={close}>
             ×
           </button>
           <h2 id="settings-title">Studio settings</h2>
         </div>
-        <p>Connect your image service, then check that the studio is ready.</p>
         {error && (
           <p role="alert" className="field-error">
             {error}
@@ -112,7 +110,7 @@ export function SettingsDialog({
             />
           </label>
           <label>
-            Proxy URL <span>Optional</span>
+            Proxy URL
             <input
               type="url"
               value={form.proxy_url}

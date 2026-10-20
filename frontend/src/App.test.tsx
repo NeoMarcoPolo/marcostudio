@@ -158,7 +158,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 async function upload() {
-  await screen.findByText("Ready to create");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Settings" })).toBeEnabled(),
+  );
   await userEvent.upload(
     screen.getByLabelText("Upload source image"),
     new File(["image"], "portrait.png", { type: "image/png" }),
@@ -277,7 +279,7 @@ describe("Relight studio", () => {
   });
   it("saves changed connection fields and refreshes readiness", async () => {
     render(<App />);
-    await screen.findByText("Ready to create");
+    await screen.findByText("ComfyUI connected");
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
     const url = screen.getByLabelText("Image service URL");
     await userEvent.clear(url);
@@ -379,15 +381,15 @@ describe("Relight studio", () => {
       ),
     ).toEqual({ request_id: expect.any(String) });
   });
-  it("polls active jobs without repeating setup checks and stops timers on unmount", async () => {
-    history = [{ ...job, status: "running", outputs: [] }];
-    polledJob = { ...job, status: "running", outputs: [] };
+  it("shows queue and execution state instead of setup readiness while polling", async () => {
+    history = [{ ...job, status: "queued", outputs: [] }];
+    polledJob = { ...job, status: "queued", outputs: [] };
     vi.useFakeTimers();
     const view = render(<App />);
     await act(async () => {
       await Promise.resolve();
     });
-    expect(screen.getByText("Ready to create")).toBeInTheDocument();
+    expect(screen.getByLabelText("Studio status")).toHaveTextContent("Queued");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
@@ -397,12 +399,22 @@ describe("Relight studio", () => {
     expect(
       calls.filter((item) => item.url.startsWith("/api/doctor")),
     ).toHaveLength(1);
+    polledJob = { ...job, status: "running", outputs: [] };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByLabelText("Studio status")).toHaveTextContent("Generating");
+    polledJob = job;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(screen.getByLabelText("Studio status")).toHaveTextContent("ComfyUI connected");
     view.unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(calls.filter((item) => item.url === "/api/jobs/job-1")).toHaveLength(
-      1,
+      3,
     );
   });
   it("keeps cancellation pending until a terminal job status is returned", async () => {
@@ -420,7 +432,7 @@ describe("Relight studio", () => {
       await screen.findByRole("button", { name: "Cancellation requested" }),
     ).toBeDisabled();
     expect(screen.queryByAltText("Result: relit.png")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Generating…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancelling…" })).toBeDisabled();
   });
   it("polls uncertain generations, blocks new submissions across selection changes, and resumes after reconciliation", async () => {
     history = [{ ...job, status: "needs_attention", outputs: [] }];
@@ -572,7 +584,7 @@ describe("Relight studio", () => {
       screen.getByRole("button", { name: "I checked — stop tracking" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(resolutionError);
-    expect(screen.getByRole("button", { name: "Generating…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Checking job status…" })).toBeDisabled();
     expect(calls.filter((item) => item.method === "POST")).toHaveLength(1);
   });
   it("accepts an existing terminal result returned while resolving uncertainty", async () => {

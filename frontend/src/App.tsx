@@ -56,6 +56,15 @@ const message = (error: unknown) =>
     : "Something went wrong. Please try again.";
 const label = (status: string) =>
   status === "abandoned" ? "Stopped tracking" : status.replaceAll("_", " ");
+const activityLabel = (status: string) =>
+  ({
+    preparing: "Preparing…",
+    submitting: "Submitting…",
+    queued: "Queued",
+    running: "Generating…",
+    cancel_requested: "Cancelling…",
+    needs_attention: "Checking job status…",
+  })[status] ?? label(status);
 
 export default function App() {
   const [feature, setFeature] = useState<Feature>();
@@ -83,6 +92,7 @@ export default function App() {
   const job = jobs.find((item) => item.id === selected);
   const result = job?.status === "succeeded" ? job.outputs[0] : undefined;
   const selectedActive = !!job && active(job);
+  const activeJob = jobs.find((item) => item.status === "running") ?? jobs.find(active);
   const uncertainJob = jobs.some((item) => item.status === "needs_attention");
   const sourceBusy = uploading || posting || loadingSelection || resolving;
   const validSeed = Number.isSafeInteger(settings.seed) && settings.seed >= 0;
@@ -347,22 +357,23 @@ export default function App() {
       <main>
         <div className="page-heading">
           <div>
-            <div className="eyebrow">YOUR IMAGE. A NEW LIGHT.</div>
-            <h1>
-              Relight <span className="version-tag">STUDIO</span>
-            </h1>
-            <p>Shape the light. Keep the moment.</p>
+            <h1>Relight</h1>
           </div>
           <div
-            className={`service-state ${doctor?.ready ? "ready" : ""}`}
+            className={`service-state ${!activeJob && !posting && doctor?.ready ? "ready" : ""}`}
             role="status"
+            aria-label="Studio status"
           >
             <span className="status-dot" />
-            {checking
-              ? "Checking studio…"
-              : doctor?.ready
-                ? "Ready to create"
-                : "Setup needed"}
+            {posting
+              ? "Submitting…"
+              : activeJob
+                ? activityLabel(activeJob.status)
+                : checking
+                  ? "Checking connection…"
+                  : doctor?.ready
+                    ? "ComfyUI connected"
+                    : "Setup needed"}
             {!checking && !doctor?.ready && (
               <button disabled={!studio} onClick={() => setShowSettings(true)}>
                 Open setup
@@ -420,7 +431,7 @@ export default function App() {
               <span className="canvas-meta">
                 {source
                   ? `${source.width} × ${source.height}`
-                  : "A fresh perspective starts here"}
+                  : null}
               </span>
             </div>
             <div className={`image-canvas ${source ? "has-source" : ""}`}>
@@ -431,12 +442,8 @@ export default function App() {
                     <span className="empty-orb" />
                     <span className="orb-shadow" />
                   </div>
-                  <h2>Bring your image to light</h2>
-                  <p>
-                    Start with a portrait, a product, or a moment.
-                    <br />
-                    Make the light your own.
-                  </p>
+                  <h2>Upload an image</h2>
+                  <p>PNG or JPEG, up to 32 MiB.</p>
                   <label className="upload-button">
                     Upload image
                     <input
@@ -447,9 +454,6 @@ export default function App() {
                       onChange={(event) => void upload(event.target.files?.[0])}
                     />
                   </label>
-                  <span className="upload-note">
-                    Choose an image from your device
-                  </span>
                 </div>
               ) : (
                 <>
@@ -494,12 +498,12 @@ export default function App() {
                   {selectedActive && (
                     <div className="job-overlay" role="status">
                       <span className="spinner" />
-                      <strong>{label(job!.status)}</strong>
-                      <span>
-                        {job!.progress !== null
-                          ? `${Math.round(job!.progress * 100)}%`
-                          : "Your light is taking shape…"}
-                      </span>
+                      <strong>{activityLabel(job!.status)}</strong>
+                      {job!.progress !== null ? (
+                        <span>{Math.round(job!.progress * 100)}%</span>
+                      ) : job!.status === "queued" ? (
+                        <span>Waiting for ComfyUI</span>
+                      ) : null}
                     </div>
                   )}
                 </>
@@ -647,11 +651,6 @@ export default function App() {
             <div className="control-section">
               <div className="control-heading">
                 <h3>Direction</h3>
-                <span>
-                  {settings.direction === "custom"
-                    ? "Custom light"
-                    : "Find your angle"}
-                </span>
               </div>
               <div
                 className="direction-pad"
@@ -818,7 +817,6 @@ export default function App() {
             <div className="control-section color-row">
               <label htmlFor="light-color">
                 <strong>Light color</strong>
-                <span>Set the atmosphere</span>
               </label>
               <div className="color-input">
                 <input
@@ -839,7 +837,6 @@ export default function App() {
             <div className="control-section seed-row">
               <label htmlFor="seed">
                 <strong>Seed</strong>
-                <span>Repeat a look</span>
               </label>
               <input
                 id="seed"
@@ -873,7 +870,7 @@ export default function App() {
                   {posting
                     ? "Submitting…"
                     : selectedActive
-                      ? "Generating…"
+                      ? activityLabel(job!.status)
                       : "Generate"}
                 </button>
                 <div className="flash-control">
@@ -895,7 +892,7 @@ export default function App() {
               <p id="flash-help">
                 Faster generation; fine detail may vary.
                 {!feature?.supported_modes.includes("standard") &&
-                  " Standard is unavailable until validated."}
+                  " Standard is unavailable."}
               </p>
               {job && (
                 <button
@@ -927,14 +924,11 @@ export default function App() {
                 Recent generations{" "}
                 <span>{jobs.length.toString().padStart(2, "0")}</span>
               </h2>
-              <p>A little light, a whole new direction.</p>
             </div>
-            <span className="local-note">Saved in your studio</span>
           </div>
           {jobs.length === 0 ? (
             <div className="empty-history">
-              <span aria-hidden="true">◷</span>Your next idea starts the story.
-              Generations will appear here.
+              <span aria-hidden="true">◷</span>No generations yet.
             </div>
           ) : (
             <div className="history-list">
@@ -979,9 +973,6 @@ export default function App() {
           )}
         </section>
       </main>
-      <footer>
-        MarcoStudio <span>Make room for a different light.</span>
-      </footer>
       {showSettings && (
         <SettingsDialog
           value={studio}
