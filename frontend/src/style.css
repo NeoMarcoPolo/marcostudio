@@ -145,15 +145,14 @@ h3 {
   top: -2px;
   right: -2px;
 }
-.workspace-label {
-  color: #75777a;
-  border-left: 1px solid #393b3f;
-  padding-left: 26px;
-  font-size: 10px;
-  letter-spacing: 1.8px;
-}
-.settings-button {
+.header-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.settings-button,
+.github-link {
   background: none;
   font-size: 12px;
   padding: 9px 12px;
@@ -771,13 +770,6 @@ h1 {
   border-radius: 50%;
   margin-left: auto;
 }
-.generate-area p {
-  font-size: 8px;
-  line-height: 1.7;
-  color: #7e8778;
-  margin-top: 11px;
-  text-align: center;
-}
 .regenerate-button {
   width: 100%;
   margin-top: 12px;
@@ -1280,15 +1272,21 @@ footer > span {
   .topbar {
     height: 65px;
     padding: 0 5%;
+    gap: 12px;
   }
-  .workspace-label {
-    display: none;
+  .header-actions {
+    gap: 0;
   }
   .brand {
     font-size: 19px;
   }
-  .settings-button {
+  .settings-button,
+  .github-link {
     font-size: 11px;
+    padding: 9px 6px;
+  }
+  .settings-button span {
+    margin-left: 6px;
   }
   main {
     padding: 28px 5% 40px;
@@ -1393,9 +1391,6 @@ footer > span {
   .flash-control button {
     flex-direction: row;
     gap: 8px;
-  }
-  .generate-area p {
-    font-size: 9px;
   }
   .generate-button {
     min-height: 45px;

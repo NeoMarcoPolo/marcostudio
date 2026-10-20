@@ -204,13 +204,12 @@ describe("Relight studio", () => {
       ),
     ).toBeInstanceOf(File);
   });
-  it("prevents duplicate submissions and explains unavailable Standard mode", async () => {
+  it("prevents duplicate submissions with Flash enabled", async () => {
     delayedPost = true;
     render(<App />);
     await upload();
     expect(screen.getByRole("switch", { name: "Flash" })).toBeChecked();
     expect(screen.getByRole("switch", { name: "Flash" })).toBeDisabled();
-    expect(screen.getByText(/Standard is unavailable/)).toBeInTheDocument();
     await userEvent.dblClick(screen.getByRole("button", { name: "Generate" }));
     await screen.findByAltText("Result: relit.png");
     expect(

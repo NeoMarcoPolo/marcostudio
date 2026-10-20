@@ -4,12 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "marcostudio"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "A local creative studio. Relight your images with ComfyUI."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics",
+]
 dependencies = [
   "fastapi>=0.143,<0.144", "uvicorn>=0.54,<0.55", "httpx>=0.28,<0.29",
   "pydantic>=2.14,<3", "pillow>=12.3,<13", "PyYAML>=6,<7",
@@ -22,6 +27,11 @@ dev = ["pytest>=9,<10", "pytest-asyncio>=1,<2", "build>=1,<2", "ruff>=0.15"]
 
 [project.scripts]
 marcostudio = "marcostudio.cli:main"
+
+[project.urls]
+Source = "https://github.com/NeoMarcoPolo/marcostudio"
+Issues = "https://github.com/NeoMarcoPolo/marcostudio/issues"
+Releases = "https://github.com/NeoMarcoPolo/marcostudio/releases"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/marcostudio"]

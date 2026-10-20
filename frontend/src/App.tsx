@@ -345,14 +345,23 @@ export default function App() {
           </span>
           Marco<span className="brand-light">Studio</span>
         </a>
-        <span className="workspace-label">IMAGE STUDIO</span>
-        <button
-          className="settings-button"
-          disabled={!studio}
-          onClick={() => setShowSettings(true)}
-        >
-          Settings <span aria-hidden="true">⚙</span>
-        </button>
+        <div className="header-actions">
+          <a
+            className="github-link"
+            href="https://github.com/NeoMarcoPolo/marcostudio"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+          <button
+            className="settings-button"
+            disabled={!studio}
+            onClick={() => setShowSettings(true)}
+          >
+            Settings <span aria-hidden="true">⚙</span>
+          </button>
+        </div>
       </header>
       <main>
         <div className="page-heading">
@@ -879,8 +888,6 @@ export default function App() {
                     aria-label="Flash"
                     aria-checked={settings.mode === "flash"}
                     disabled={!feature?.supported_modes.includes("standard")}
-                    aria-describedby="flash-help"
-                    title="Faster generation; fine detail may vary."
                   >
                     <span className="switch-track">
                       <span />
@@ -889,11 +896,6 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <p id="flash-help">
-                Faster generation; fine detail may vary.
-                {!feature?.supported_modes.includes("standard") &&
-                  " Standard is unavailable."}
-              </p>
               {job && (
                 <button
                   className="regenerate-button"

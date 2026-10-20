@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test -- --run
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - name: Check the bundled interface is current
+        run: git diff --exit-code -- src/marcostudio/web
+
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.8.22'
+          python-version: '3.12'
+      - run: uv sync --locked --extra dev
+      - run: uv run --no-sync python -m pytest -q
+      - run: uv run --no-sync python -m ruff check src tests
+      - run: uv run --no-sync python -m build
+      - name: Install and check the wheel in a clean environment
+        run: |
+          uv venv build/wheel-smoke
+          uv pip install --python build/wheel-smoke dist/*.whl
+          uv run --no-project --python build/wheel-smoke python -I -m marcostudio --version
+          uv run --no-project --python build/wheel-smoke python -I -c "from importlib.resources import files; from marcostudio.api import create_app; web = files('marcostudio').joinpath('web'); assert web.joinpath('index.html').is_file(); assert any(web.joinpath('assets').iterdir()); print('Packaged API and interface available')"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error
