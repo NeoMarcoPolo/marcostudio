@@ -53,6 +53,13 @@ let polledJob = job;
 let metadataWait: Promise<void> | undefined;
 let submissionWait: Promise<void> | undefined;
 let settingsWait: Promise<void> | undefined;
+let studioSettings = {
+  comfy_url: "http://localhost:8188",
+  proxy_url: "http://localhost:8189",
+  comfy_dir: "C:\\AI\\ComfyUI",
+  data_dir: "data",
+  transport: "Comfy SDK + local API proxy",
+};
 let metadataAsset = source;
 let resolutionError: string | undefined;
 let resolutionJob = {
@@ -78,6 +85,13 @@ beforeEach(() => {
   metadataWait = undefined;
   submissionWait = undefined;
   settingsWait = undefined;
+  studioSettings = {
+    comfy_url: "http://localhost:8188",
+    proxy_url: "http://localhost:8189",
+    comfy_dir: "C:\\AI\\ComfyUI",
+    data_dir: "data",
+    transport: "Comfy SDK + local API proxy",
+  };
   metadataAsset = source;
   resolutionError = undefined;
   resolutionJob = { ...job, status: "abandoned", outputs: [] };
@@ -102,24 +116,20 @@ beforeEach(() => {
             defaults,
           },
         ];
-      else if (url === "/api/settings")
-        data = {
-          comfy_url: "http://localhost:8188",
-          proxy_url: null,
-          comfy_dir: null,
-          data_dir: "data",
-          transport: "direct",
-        };
-      else if (url.startsWith("/api/doctor"))
+      else if (url === "/api/settings") {
+        if (method === "PUT")
+          studioSettings = { ...studioSettings, ...JSON.parse(String(init?.body)) };
+        data = studioSettings;
+      } else if (url.startsWith("/api/doctor"))
         data = {
           ready,
           checks: [
             {
-              name: "Connection",
+              name: "runtime",
               status: ready ? "pass" : "fail",
               message: ready
                 ? "Connected"
-                : "Start the image service and refresh readiness.",
+                : "ComfyUI unreachable or response invalid: ConnectError",
             },
           ],
           models: {},
@@ -241,7 +251,7 @@ describe("Relight studio", () => {
       screen.getByRole("dialog", { name: "Studio settings" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Start the image service and refresh readiness."),
+      screen.getByText("ComfyUI unreachable or response invalid: ConnectError"),
     ).toBeInTheDocument();
   });
   it("allows keyboard custom direction and validates seed without submitting", async () => {
@@ -277,15 +287,17 @@ describe("Relight studio", () => {
       seed: 123,
     });
   });
-  it("saves changed connection fields and refreshes readiness", async () => {
+  it("saves only edited connection fields and checks the saved settings", async () => {
     render(<App />);
     await screen.findByText("ComfyUI connected");
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const url = screen.getByLabelText("Image service URL");
+    expect(screen.getByRole("button", { name: "Save and check" })).toBeDisabled();
+    expect(screen.queryByLabelText("API proxy URL")).not.toBeInTheDocument();
+    const url = screen.getByLabelText("ComfyUI URL");
     await userEvent.clear(url);
     await userEvent.type(url, "http://localhost:9999");
     await userEvent.click(
-      screen.getByRole("button", { name: "Save settings" }),
+      screen.getByRole("button", { name: "Save and check" }),
     );
     await waitFor(() =>
       expect(calls.filter((x) => x.method === "PUT")).toHaveLength(1),
@@ -293,9 +305,50 @@ describe("Relight studio", () => {
     expect(JSON.parse(calls.find((x) => x.method === "PUT")!.body)).toEqual({
       comfy_url: "http://localhost:9999",
     });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save and check" })).toBeDisabled(),
+    );
+    expect(calls.filter((x) => x.url.startsWith("/api/doctor"))).toHaveLength(2);
     expect(
       calls.filter((x) => x.url === "/api/jobs" && x.method === "POST"),
     ).toHaveLength(0);
+  });
+  it("preserves an advanced connection edit while collapsed and requires the ComfyUI folder", async () => {
+    render(<App />);
+    await screen.findByText("ComfyUI connected");
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const proxy = screen.getByLabelText("API proxy URL");
+    await userEvent.clear(proxy);
+    await userEvent.type(proxy, "http://localhost:8190");
+    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    const folder = screen.getByLabelText("ComfyUI folder");
+    await userEvent.clear(folder);
+    await userEvent.click(screen.getByRole("button", { name: "Save and check" }));
+    expect(calls.filter((x) => x.method === "PUT")).toHaveLength(0);
+    await userEvent.type(folder, "C:\\AI\\ComfyUI");
+    await userEvent.click(screen.getByRole("button", { name: "Save and check" }));
+    await waitFor(() => expect(calls.filter((x) => x.method === "PUT")).toHaveLength(1));
+    expect(JSON.parse(calls.find((x) => x.method === "PUT")!.body)).toEqual({
+      proxy_url: "http://localhost:8190",
+    });
+  });
+  it("locks connection edits during an active job while allowing setup checks", async () => {
+    history = [{ ...job, status: "running", outputs: [] }];
+    polledJob = { ...job, status: "running", outputs: [] };
+    render(<App />);
+    await screen.findByText("Generating…");
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByLabelText("ComfyUI URL")).toBeDisabled();
+    expect(screen.getByLabelText("ComfyUI folder")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save and check" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByLabelText("API proxy URL")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Check setup" }));
+    await waitFor(() =>
+      expect(calls.filter((x) => x.url.startsWith("/api/doctor"))).toHaveLength(2),
+    );
+    expect(calls.filter((x) => x.method !== "GET")).toHaveLength(0);
   });
   it("retains the request identity when explicitly retrying an uncertain submission", async () => {
     networkFailure = true;
@@ -530,7 +583,7 @@ describe("Relight studio", () => {
       pending.release();
     });
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByLabelText("Image service URL")).toHaveValue(
+    expect(screen.getByLabelText("ComfyUI URL")).toHaveValue(
       "http://localhost:8188",
     );
   });

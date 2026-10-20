@@ -978,6 +978,7 @@ export default function App() {
           value={studio}
           doctor={doctor}
           checking={checking}
+          locked={!!activeJob || posting || !!retry}
           close={closeSettings}
           refresh={() => void refreshDoctor()}
           save={async (changes) => {
@@ -988,6 +989,7 @@ export default function App() {
             });
             setStudio(value);
             await refreshDoctor();
+            return value;
           }}
         />
       )}

@@ -1,10 +1,48 @@
 import { useEffect, useRef, useState } from "react";
 import type { Doctor, StudioSettings } from "./api";
 
+const checkLabels: Record<string, string> = {
+  python: "Python",
+  mode: "Generation mode",
+  model_paths: "Model folders",
+  installation: "ComfyUI folder",
+  runtime: "ComfyUI connection",
+  sdk: "ComfyUI client",
+  proxy: "API proxy connection",
+  storage: "Saved files",
+  hashes: "Model checksums",
+  "model:diffusion": "Qwen image model",
+  "model:encoder": "Text encoder",
+  "model:vae": "Image decoder",
+  "model:lightning": "Flash adapter",
+  "model:relight": "Relight adapter",
+};
+
+function CheckList({ checks }: { checks: Doctor["checks"] }) {
+  return (
+    <ul className="readiness-list">
+      {checks.map((check, index) => (
+        <li key={`${check.name}-${index}`}>
+          <span className={`check-status ${check.status}`} aria-hidden="true">
+            {check.status === "pass" ? "✓" : check.status === "warn" ? "!" : "×"}
+          </span>
+          <div>
+            <strong>
+              {checkLabels[check.name] ?? check.name.replace("node:", "ComfyUI node: ")}
+            </strong>
+            <p>{check.message}</p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function SettingsDialog({
   value,
   doctor,
   checking,
+  locked,
   close,
   refresh,
   save,
@@ -12,9 +50,10 @@ export function SettingsDialog({
   value?: StudioSettings;
   doctor?: Doctor;
   checking: boolean;
+  locked: boolean;
   close: () => void;
   refresh: () => void;
-  save: (changes: Partial<StudioSettings>) => Promise<void>;
+  save: (changes: Partial<StudioSettings>) => Promise<StudioSettings>;
 }) {
   const [form, setForm] = useState({
     comfy_url: value?.comfy_url ?? "",
@@ -24,7 +63,20 @@ export function SettingsDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [advanced, setAdvanced] = useState(!value?.proxy_url);
   const dialog = useRef<HTMLDivElement>(null);
+  const changes: Partial<StudioSettings> = {};
+  for (const key of ["comfy_url", "proxy_url", "comfy_dir"] as const) {
+    const next = form[key].trim();
+    if (next !== (value?.[key] ?? "")) changes[key] = next;
+  }
+  const dirty = Object.keys(changes).length > 0;
+  const failures = doctor?.checks.filter((check) => check.status === "fail") ?? [];
+  const edit = (key: keyof typeof form, next: string) => {
+    setForm((previous) => ({ ...previous, [key]: next }));
+    setSaved(false);
+    setError("");
+  };
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current;
@@ -55,20 +107,26 @@ export function SettingsDialog({
     };
   }, [close]);
   const update = async () => {
+    if (saving || checking || locked || !value || !dirty) return;
+    if (!form.comfy_url.trim() || !form.comfy_dir.trim() || !form.proxy_url.trim()) {
+      setAdvanced(true);
+      setError("Enter the ComfyUI URL, ComfyUI folder, and API proxy URL.");
+      return;
+    }
     setSaving(true);
     setError("");
     setSaved(false);
     try {
-      const changed: Partial<StudioSettings> = {};
-      for (const key of ["comfy_url", "proxy_url", "comfy_dir"] as const) {
-        const next =
-          key === "comfy_url" ? form[key].trim() : form[key].trim() || null;
-        if (next !== value?.[key]) changed[key] = next as string;
-      }
-      await save(changed);
+      const updated = await save(changes);
+      setForm({
+        comfy_url: updated.comfy_url,
+        proxy_url: updated.proxy_url ?? "",
+        comfy_dir: updated.comfy_dir ?? "",
+      });
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save settings.");
+      setAdvanced(true);
     } finally {
       setSaving(false);
     }
@@ -88,6 +146,36 @@ export function SettingsDialog({
           </button>
           <h2 id="settings-title">Studio settings</h2>
         </div>
+        <section className="setup-summary" aria-label="Setup status">
+          <div className="setup-heading">
+            <h3 role="status">
+              {checking
+                ? "Checking setup…"
+                : dirty
+                  ? "Unsaved changes"
+                  : doctor?.ready
+                    ? "Setup checks passed"
+                    : doctor
+                      ? "Setup needs attention"
+                      : "Setup not checked"}
+            </h3>
+            <button disabled={checking || saving || dirty} onClick={refresh}>
+              Check setup
+            </button>
+          </div>
+          {dirty ? (
+            <p>Save changes to check the new connection.</p>
+          ) : !checking && failures.length > 0 ? (
+            <CheckList checks={failures} />
+          ) : !checking && !doctor ? (
+            <p>Use Check setup to test the connection and Relight model files.</p>
+          ) : null}
+        </section>
+        {locked && (
+          <p className="settings-notice">
+            Finish or resolve active generations before editing the connection.
+          </p>
+        )}
         {error && (
           <p role="alert" className="field-error">
             {error}
@@ -100,81 +188,92 @@ export function SettingsDialog({
           }}
         >
           <label>
-            Image service URL
+            ComfyUI URL
             <input
-              aria-label="Image service URL"
+              aria-label="ComfyUI URL"
+              aria-describedby="comfy-url-help"
               type="url"
               required
+              disabled={locked || saving}
               value={form.comfy_url}
-              onChange={(e) => setForm({ ...form, comfy_url: e.target.value })}
+              onChange={(e) => edit("comfy_url", e.target.value)}
             />
+            <small id="comfy-url-help">
+              Start ComfyUI, then enter its local address here.
+            </small>
           </label>
           <label>
-            Proxy URL
+            ComfyUI folder
             <input
-              type="url"
-              value={form.proxy_url}
-              onChange={(e) => setForm({ ...form, proxy_url: e.target.value })}
-            />
-          </label>
-          <label>
-            Image service folder <span>Optional</span>
-            <input
+              aria-label="ComfyUI folder"
+              aria-describedby="comfy-folder-help"
+              required
+              disabled={locked || saving}
               value={form.comfy_dir}
-              onChange={(e) => setForm({ ...form, comfy_dir: e.target.value })}
+              onChange={(e) => edit("comfy_dir", e.target.value)}
             />
+            <small id="comfy-folder-help">
+              Folder containing main.py on the machine running MarcoStudio.
+              Used to find your Relight models.
+            </small>
           </label>
-          <dl>
-            <div>
-              <dt>Data folder</dt>
-              <dd>{value?.data_dir ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Transport</dt>
-              <dd>{value?.transport ?? "Unavailable"}</dd>
-            </div>
-          </dl>
-          <button
-            className="generate-button"
-            disabled={saving || !value}
-            type="submit"
-          >
-            {saving ? "Saving…" : "Save settings"}
-          </button>
-          {saved && (
-            <span className="saved-message" role="status">
-              Settings saved
-            </span>
-          )}
-        </form>
-        <div className="readiness-heading">
-          <h3>Setup checks</h3>
-          <button disabled={checking} onClick={refresh}>
-            {checking ? "Checking…" : "Refresh readiness"}
-          </button>
-        </div>
-        <ul className="readiness-list">
-          {doctor?.checks.map((check, index) => (
-            <li key={`${check.name}-${index}`}>
-              <span className={`check-status ${check.status}`}>
-                {check.status === "pass"
-                  ? "✓"
-                  : check.status === "warn"
-                    ? "!"
-                    : "×"}
-              </span>
-              <div>
-                <strong>{check.name}</strong>
-                <p>{check.message}</p>
+          <div className="settings-advanced">
+            <button
+              type="button"
+              aria-expanded={advanced}
+              aria-controls="advanced-settings"
+              onClick={() => setAdvanced(!advanced)}
+            >
+              Advanced <span aria-hidden="true">{advanced ? "−" : "+"}</span>
+            </button>
+            {advanced && (
+              <div id="advanced-settings">
+                <label>
+                  API proxy URL
+                  <input
+                    aria-label="API proxy URL"
+                    aria-describedby="proxy-url-help"
+                    type="url"
+                    required
+                    disabled={locked || saving}
+                    value={form.proxy_url}
+                    onChange={(e) => edit("proxy_url", e.target.value)}
+                  />
+                  <small id="proxy-url-help">
+                    MarcoStudio uses this local bridge to submit and track jobs.
+                    Its upstream must match the ComfyUI URL above.
+                  </small>
+                </label>
+                <dl>
+                  <div>
+                    <dt>Saved images and history</dt>
+                    <dd>{value?.data_dir ?? "Unavailable"}</dd>
+                  </div>
+                </dl>
+                {doctor && !dirty && !checking && (
+                  <section aria-label="Diagnostics">
+                    <h3>Diagnostics</h3>
+                    <CheckList checks={doctor.checks} />
+                  </section>
+                )}
               </div>
-            </li>
-          )) ?? (
-            <li>
-              Service checks unavailable. Check your connection settings and
-              refresh.
-            </li>
-          )}
-        </ul>
+            )}
+          </div>
+          <div className="settings-actions">
+            <button
+              className="generate-button"
+              disabled={saving || checking || locked || !value || !dirty}
+              type="submit"
+            >
+              {saving ? (checking ? "Checking…" : "Saving…") : "Save and check"}
+            </button>
+            {saved && !dirty && (
+              <span className="saved-message" role="status">
+                Settings saved
+              </span>
+            )}
+          </div>
+        </form>
       </div>
     </div>
   );
