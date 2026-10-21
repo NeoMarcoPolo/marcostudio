@@ -4,25 +4,21 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Relight images with your own ComfyUI. Choose the light, generate, compare, download, or use the result as a new source. Images, settings and job history stay on your computer. No MarcoStudio account or credits.
+An open-source creative studio powered by ComfyUI. **Relight** is the first tool: adjust an image's lighting, compare the result, download it, or use it as your next source.
 
-**Development preview.** Hardware coverage and output quality are still being evaluated. [Download the preview](https://github.com/NeoMarcoPolo/marcostudio/releases) or install from source below.
+The current alpha runs locally with your own ComfyUI. Images, settings, and job history stay on your computer. No MarcoStudio account or credits.
 
-| Connection | Status |
-| --- | --- |
-| Installed MarcoStudio + local ComfyUI | Available: Relight with Flash |
-| Website + your ComfyUI | Planned |
-| Your Comfy API key + Comfy Cloud | Planned |
+Relight uses Qwen Image Edit 2509 and the Relight adapter, with a four-step Lightning workflow exposed as **Flash**.
 
-Relight uses one pinned public workflow: Qwen Image Edit 2509 + the Relight adapter. **Flash** runs its published four-step Lightning recipe. Standard remains unavailable until a separate sampling profile is validated. Acceleration can affect results; no specific quality loss or speedup is claimed.
+## Quick start (Windows)
 
-## Windows setup
+You need:
 
-You need Python 3.12+, a working local [ComfyUI installation](https://docs.comfy.org/installation/system_requirements), and enough GPU/system memory for the selected Qwen models. The five model files total approximately **31.2 GB**, in addition to ComfyUI, Python packages and output storage. A minimum VRAM requirement has not been established for this release.
+- Git and Python 3.12+.
+- A working [ComfyUI installation](https://docs.comfy.org/installation/system_requirements), running in its own environment.
+- About **31.2 GB** for the five model files, plus space for dependencies and outputs. GPU memory requirements depend on your ComfyUI setup; a minimum has not been established.
 
-ComfyUI runs in its own Python environment. MarcoStudio does not install, upgrade, restart or manage that runtime. Its doctor checks the running node contracts rather than assuming a version number is sufficient. No extra custom-node package is required by this workflow.
-
-In PowerShell:
+In PowerShell, clone the repo and configure the path to your ComfyUI folder:
 
 ```powershell
 git clone https://github.com/NeoMarcoPolo/marcostudio.git
@@ -33,70 +29,63 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\marcostudio.exe models
 ```
 
-Use the pinned download URLs printed by `models` and place each file in its listed model category. Model weights are separate downloads and have their own licenses. Never rename a different checkpoint to satisfy a filename check. Use **Check setup** in Settings once ComfyUI recognizes the files.
+Download the models from the URLs printed by `models` and place them in the listed ComfyUI model folders. Model weights are downloaded separately and have their own licenses. No extra custom-node package is required.
 
-Start ComfyUI using its normal launcher. In a second terminal, run the local proxy:
+Start ComfyUI with its normal launcher. From the MarcoStudio folder, start the API proxy and leave it running:
 
 ```powershell
 .\.venv\Scripts\marcostudio.exe proxy
 ```
 
-In a third terminal:
+In another PowerShell terminal, open the MarcoStudio folder, check setup, and start the studio:
 
 ```powershell
 .\.venv\Scripts\marcostudio.exe doctor --feature relight --verify-hashes
 .\.venv\Scripts\marcostudio.exe serve
 ```
 
-Open **http://127.0.0.1:7870**. ComfyUI and the API proxy default to loopback ports 8188 and 8189. Their URLs can be changed in Settings or with `configure --comfy-url ... --proxy-url ...`. Keep the proxy's upstream and the native URL aligned. Stop and restart the proxy after changing its configuration.
+Open [http://127.0.0.1:7870](http://127.0.0.1:7870). You can also run **Check setup** from Settings.
 
-The Python wheel includes the built interface; **Node is not required to run it**. After packages and models are installed, the app needs no account, external service, CDN or internet connection. This release binds to loopback and is intended for one local user.
+The interface is included: **Node is not required to run MarcoStudio**. Once dependencies and models are installed, it works offline. The server accepts local connections only.
 
-To install a downloaded wheel instead, create a Python virtual environment and run `python -m pip install <path-to-wheel>` with that environment's Python. Then follow the same configuration, model and startup steps. Packages are distributed through GitHub Releases.
+Prebuilt Python wheels are available in [GitHub Releases](https://github.com/NeoMarcoPolo/marcostudio/releases). To use one instead of cloning the repo, create a virtual environment and install the downloaded wheel with that environment's Python, then follow the same configuration and startup steps.
 
 ## Using Relight
 
-- Upload a still PNG or JPEG, up to 32 MiB and 32 megapixels. The original is retained; the working image is orientation-corrected and stripped of source metadata.
-- Choose a direction preset or custom angles, soft/hard lighting, brightness, color and seed. Controls guide the model through a prompt: they are approximate artistic instructions, not a physically calibrated lighting simulation. Nearby custom angles can map to the same instruction.
-- Click Generate explicitly. Editing controls never submits work. The four-step workflow may resize the image; actual output dimensions are recorded.
-- Compare the original/result, download, reuse the result, or regenerate a historical job from its recorded input and settings.
+- Upload a PNG or JPEG, up to 32 MiB and 32 megapixels.
+- Choose a direction, softness, brightness, color, and seed, then click **Generate**.
+- Compare, download, reuse the result, or regenerate a previous job from history.
 
-Identity, geometry, text and background preservation require evaluation on your own inputs. Successful execution and image decoding do not establish photographic quality or equivalence to another product.
+History and job tracking survive page refreshes and service restarts. Lighting controls guide the model through a prompt; results may also change image details or dimensions.
 
-## Jobs and recovery
+If a job's status is uncertain, check ComfyUI before submitting it again. **Resolve uncertain job** stops tracking a job after you confirm it is no longer running; it does not cancel or resubmit it. Cancellation targets only the selected job and requires a compatible ComfyUI runtime.
 
-Jobs persist across browser and service restarts. The service serializes its own submissions. Repeated requests with the same request ID return the existing job; changed input/settings with that ID are rejected. An uncertain submission is reconciled without automatic resubmission.
+## Configuration
 
-Cancellation is scoped to a known job through ComfyUI's own job endpoint. It may be unavailable on older runtimes. A request stays pending until termination or queue removal is confirmed. MarcoStudio never clears the shared queue or calls global interruption.
+ComfyUI defaults to `http://127.0.0.1:8188`, and the API proxy to `http://127.0.0.1:8189`. Change these in Settings or with `configure --comfy-url ... --proxy-url ...`. Restart the proxy after changing its configuration.
 
-If a run remains uncertain because its upstream history was lost, first inspect ComfyUI. **Resolve uncertain job** asks for explicit confirmation that it is no longer running, checks the reachable runtime, and stops tracking it. This action neither cancels nor resubmits work; history says **Stopped tracking**, not success. Keep an uncertain job tracked until you have checked its state.
+Configuration, images, and job history are stored in your operating system's MarcoStudio application-data directory, outside the source checkout. Use `configure --data-dir ...` to choose another data directory for the next server start. Close the server before backing up that directory.
 
-User configuration and data use your operating system's MarcoStudio application-data location. `configure --data-dir ...` chooses a different data location for the next server start. `--config <file>` (before the command), or `MARCOSTUDIO_CONFIG`, selects an alternate configuration file. Originals, normalized assets, SQLite history and JSON receipts are stored outside the source checkout by default. Only one server may use a data directory at a time. Close the server before backing up the entire directory.
-
-For additional model locations, pass the same YAML files used by ComfyUI to `configure --extra-model-path "C:\AI\extra_model_paths.yaml"` (repeatable). The standard `extra_model_paths.yaml` beside ComfyUI's `main.py` is discovered automatically. Ambiguous basenames require an exact loader-relative name in the configuration's `model_aliases` map; keys are `diffusion`, `encoder`, `vae`, `lightning`, and `relight`.
+ComfyUI's `extra_model_paths.yaml` is discovered automatically. For other model-path files, use `configure --extra-model-path "C:\AI\extra_model_paths.yaml"` (repeatable). To select a different configuration file, put `--config <file>` before the command or set `MARCOSTUDIO_CONFIG`.
 
 ## CLI
 
 These examples assume the virtual environment is activated. Otherwise use `.\.venv\Scripts\marcostudio.exe` as above.
 
 ```powershell
-marcostudio doctor --all --json
 marcostudio doctor --feature relight --verify-hashes
 marcostudio models --json
-marcostudio run relight --input photo.png --direction front --softness soft --brightness 50 --color "#ffffff" --mode flash --seed 42 --wait 600
+marcostudio run relight --input photo.png --direction front --mode flash --seed 42 --wait 600
 marcostudio jobs list
 marcostudio jobs show <job-id>
 marcostudio jobs cancel <job-id>
-marcostudio jobs resolve <job-id> --confirm-not-running
 ```
 
-`run` and `jobs` contact the running studio (`--server` changes its loopback URL). They use the same validation and job service as the interface. Save the printed request ID; use `--request-id` with the same input and settings for a deliberate retry after a lost response. No submission is retried automatically. A wait timeout exits 3 and leaves the job running; inspect it using `jobs show`.
-
-Doctor is read-only: no downloads, tensor loading, inference or queue mutation. Normal checks verify registered nodes, input contracts, loader choices, file sizes and safetensors headers. Exact checkpoint identities remain **unverified** unless `--verify-hashes` streams their contents. Proxy health is checked separately from native ComfyUI. Exit codes: 0 ready, 1 prerequisites unavailable/incompatible/indeterminate, 2 invalid configuration or internal error. Readiness does not prove inference quality.
+`doctor` checks your runtime and models without downloading anything or submitting a job; `--verify-hashes` also verifies the model files' SHA256 hashes. `run` and `jobs` require the studio server to be running. A `--wait` timeout leaves the job running. Use `marcostudio <command> --help` for more options.
 
 ## Contributing
 
-[Report a bug](https://github.com/NeoMarcoPolo/marcostudio/issues) with your OS, Python/ComfyUI versions, reproduction steps and relevant diagnostic results. Remove personal paths and image data from reports. Keep pull requests focused; discuss new tools or execution backends in an issue first.
+[Report bugs](https://github.com/NeoMarcoPolo/marcostudio/issues) with your OS, Python/ComfyUI versions, and reproduction steps. Remove personal paths and image data from diagnostic output before sharing it. Pull requests are welcome.
 
 Python dependencies are locked in `uv.lock`; frontend dependencies in `frontend/package-lock.json`. Use Python 3.12 and a Node version supported by the pinned Vite release (Node 22.12+ is suitable).
 
@@ -113,13 +102,7 @@ cd ..
 .\.venv\Scripts\python.exe -m build
 ```
 
-Frontend development uses same-origin `/api` requests through Vite's local proxy. The production build is stored in `src/marcostudio/web`; rebuild it after changing the interface. Tests use synthetic images and protocol mocks, including the released SDK/proxy pair, and require no GPU.
-
-CI runs the existing checks and installs the wheel in a separate environment on Windows, Linux and macOS. These checks cover application behavior and packaging, not GPU compatibility.
-
-## Releases
-
-Update the Python version in `pyproject.toml` and `src/marcostudio/__init__.py`, refresh `uv.lock`, and commit the rebuilt interface. A matching `v*` tag (for example, `v0.1.0a1`) runs CI and publishes the wheel and source archive as a GitHub prerelease. The workflow does not publish to PyPI.
+For frontend development, run `npm run dev` from `frontend` with the studio server running. Rebuild and commit `src/marcostudio/web` after changing the interface. The existing tests require no GPU. CI checks the frontend and installs the Python package on Windows, Linux, and macOS.
 
 ## License
 

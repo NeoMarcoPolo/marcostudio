@@ -1,6 +1,8 @@
 .venv/
 .worktrees/
 .superpowers/
+.codex/
+.omx/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -13,4 +15,13 @@ build/
 *.log
 *.safetensors
 *.sqlite*
+*.db
+*.db-*
+*.pem
+*.key
+*.p12
+*.pfx
+data/
+output/
+outputs/
 coverage/
