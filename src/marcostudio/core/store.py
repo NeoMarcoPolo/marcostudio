@@ -80,7 +80,9 @@ class Store:
             rows = conn.execute("SELECT body FROM jobs ORDER BY rowid DESC").fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    def create_job(self, source_id: str, settings: dict, request_id: str) -> dict:
+    def create_job(
+        self, source_id: str, settings: dict, request_id: str, *, feature: str = "relight"
+    ) -> dict:
         self.asset(source_id)
         if (
             not 1 <= len(request_id) <= 128
@@ -94,7 +96,7 @@ class Store:
         stamp, job_id = now(), str(uuid.uuid4())
         body = {
             "id": job_id,
-            "feature": "relight",
+            "feature": feature,
             "request_id": request_id,
             "settings": settings,
             "source_id": source_id,
@@ -117,9 +119,9 @@ class Store:
                 "SELECT fingerprint,body FROM jobs WHERE request_id=?", (request_id,)
             ).fetchone()
             if existing:
-                if existing[0] != fingerprint:
+                if existing[0] != fingerprint or json.loads(existing[1])["feature"] != feature:
                     raise ValueError(
-                        "This request_id was already used with different settings or input"
+                        "This request_id was already used with a different tool, settings or input"
                     )
                 return json.loads(existing[1])
             conn.execute(

@@ -6,6 +6,12 @@ The Relight API graph adapts Comfy Org workflow_templates at revision
 04a508b31bec1818e48122ca0761c1de4140a234:
 https://github.com/Comfy-Org/workflow_templates/blob/04a508b31bec1818e48122ca0761c1de4140a234/templates/image_qwen_image_edit_2509_relight.json
 
+The Remove Background API graph adapts the same project's template at revision
+e7cd011d4ded3411c2f481200544f0be6fdc962e:
+https://github.com/Comfy-Org/workflow_templates/blob/e7cd011d4ded3411c2f481200544f0be6fdc962e/templates/image_qwen_image_2_1_background_removal.json
+Changes: flattened the image-edit subgraph, fixed the background-removal prompt,
+bounded the reference pixel budget to 1024 squared, and used SaveImage for PNG output.
+
 MIT License
 
 Copyright (c) 2023-present Comfy Org
@@ -89,7 +95,12 @@ Separately downloaded model weights
 ----------------------------------
 Model weights are not included in MarcoStudio or licensed by its MIT license.
 Canonical sources, pinned revisions, sizes and hashes are listed by
-'marcostudio models --json'. Consult the licenses and model cards at the source:
+'marcostudio models --feature <tool> --json'. Consult the licenses and model cards at the source:
+
+Qwen Image 2.1 (Qwen Research License; research and evaluation only;
+commercial use requires a separate license):
+https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE
+https://huggingface.co/Comfy-Org/Qwen-Image-2.1
 
 Qwen Image Edit 2509 / Qwen Image (Apache-2.0 model-card metadata):
 https://huggingface.co/Qwen/Qwen-Image-Edit-2509

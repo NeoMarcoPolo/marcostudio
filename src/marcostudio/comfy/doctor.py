@@ -9,19 +9,32 @@ import httpx
 import yaml
 
 from ..config import Settings
-from ..features.relight.manifest import MODELS
-from ..features.relight.settings import RelightSettings
-from ..features.relight.workflow import compile_workflow
+from ..features import FEATURES, get_feature
 from .model_paths import inspect_model, model_roots, resolve_model, select_loader
 
 
 def validate_inputs(node: dict, definition: dict):
     inputs = definition.get("input", {})
     fields = inputs.get("required", {}) | inputs.get("optional", {})
-    for field in inputs.get("required", {}):
+    required = set(inputs.get("required", {}))
+    # V3 autogrow sockets are serialized as dotted inputs in API workflows.
+    for field, spec in list(fields.items()):
+        if spec[0] != "COMFY_AUTOGROW_V3":
+            continue
+        template = spec[1]["template"]
+        child = next(iter(template["input"]["required"].values()))
+        names = [f"{field}.{name}" for name in template["names"]]
+        fields.pop(field)
+        required.discard(field)
+        fields.update(dict.fromkeys(names, child))
+        if sum(name in node["inputs"] for name in names) < template.get("min", 0):
+            raise ValueError(f"Too few inputs for {field}")
+    for field in required:
         if field not in node["inputs"]:
             raise ValueError(f"Required input {field} is absent from the supported workflow")
-    dynamic = {(m.loader, m.field) for m in MODELS} | {("LoadImage", "image")}
+    dynamic = {
+        (m.loader, m.field) for feature in FEATURES.values() for m in feature.manifest.MODELS
+    } | {("LoadImage", "image")}
     for field, value in node["inputs"].items():
         if field not in fields:
             raise ValueError(f"Workflow input {field} is not supported")
@@ -40,6 +53,8 @@ def validate_inputs(node: dict, definition: dict):
         if kind == "STRING" and not isinstance(value, str):
             raise ValueError(f"Invalid text for {field}")
         limits = spec[1] if len(spec) > 1 and isinstance(spec[1], dict) else {}
+        if kind == "COMBO" and value not in limits.get("options", []):
+            raise ValueError(f"Unsupported {field}: {value}")
         if type(value) in {int, float}:
             if value < limits.get("min", float("-inf")) or value > limits.get("max", float("inf")):
                 raise ValueError(f"Value for {field} is outside the runtime's bounds")
@@ -47,21 +62,25 @@ def validate_inputs(node: dict, definition: dict):
 
 async def diagnose(
     config: Settings,
-    mode: str = "flash",
+    mode: str | None = None,
     verify_hashes: bool = False,
     client: httpx.AsyncClient | None = None,
+    *,
+    feature: str = "relight",
 ) -> dict:
     if client is None:
         async with httpx.AsyncClient(timeout=config.request_timeout, trust_env=False) as owned:
-            return await diagnose(config, mode, verify_hashes, owned)
+            return await diagnose(config, mode, verify_hashes, owned, feature=feature)
+    tool = get_feature(feature)
+    mode = mode or tool.settings().mode
     checks, models, runtime, identities = [], {}, {}, {}
 
     def record(name, status, message):
         checks.append({"name": name, "status": status, "message": str(message)})
 
     record("python", "pass" if sys.version_info >= (3, 12) else "fail", sys.version.split()[0])
-    if mode != "flash":
-        record("mode", "fail", "Standard is not validated. Select Flash.")
+    if mode not in tool.modes:
+        record("mode", "fail", f"{tool.name} supports {', '.join(tool.modes)} mode")
     try:
         roots = model_roots(config)
         record("model_paths", "pass", "Configured model paths resolved")
@@ -103,7 +122,7 @@ async def diagnose(
     except (httpx.HTTPError, ValueError) as exc:
         record("proxy", "fail", f"Proxy unavailable or incompatible: {exc}")
 
-    graph = compile_workflow(RelightSettings(), "source.png", "readiness", {})
+    graph = tool.compile(tool.settings(), "source.png", "readiness", {})
     classes = sorted({n["class_type"] for n in graph.values()})
     definitions = {}
     semaphore = asyncio.Semaphore(4)
@@ -130,7 +149,7 @@ async def diagnose(
 
     if runtime:
         await asyncio.gather(*(inspect_node(kind) for kind in classes))
-    for model in MODELS:
+    for model in tool.manifest.MODELS:
         try:
             inputs = definitions.get(model.loader, {}).get("input", {})
             fields = inputs.get("required", {}) | inputs.get("optional", {})
@@ -175,4 +194,5 @@ async def diagnose(
         "runtime": runtime,
         "identities": identities,
         "mode": mode,
+        "feature": feature,
     }

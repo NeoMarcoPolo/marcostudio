@@ -16,6 +16,11 @@ export interface RelightSettings {
   mode: "flash";
   seed: number;
 }
+export type FeatureId = "relight" | "remove-background";
+export interface RemoveBackgroundSettings {
+  mode: "standard";
+  seed: number;
+}
 export interface Asset {
   id: string;
   url: string;
@@ -24,10 +29,9 @@ export interface Asset {
   media_type: string;
   filename: string;
 }
-export interface Job {
+interface JobBase {
   id: string;
   status: string;
-  settings: RelightSettings;
   source_id: string;
   outputs: Asset[];
   error: string | null;
@@ -37,11 +41,16 @@ export interface Job {
   elapsed_seconds: number | null;
   queue_seconds: number | null;
 }
+export type Job = JobBase &
+  (
+    | { feature: "relight"; settings: RelightSettings }
+    | { feature: "remove-background"; settings: RemoveBackgroundSettings }
+  );
 export interface Feature {
-  id: string;
+  id: FeatureId;
   name: string;
   supported_modes: string[];
-  defaults: RelightSettings;
+  defaults: RelightSettings | RemoveBackgroundSettings;
 }
 export interface StudioSettings {
   comfy_url: string;

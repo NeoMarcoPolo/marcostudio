@@ -14,6 +14,7 @@ import httpx
 
 from . import __version__
 from .config import Settings, load_settings, local_url, save_settings
+from .features import FEATURES, get_feature
 
 
 def emit(value):
@@ -33,15 +34,16 @@ def parser():
         configure.add_argument(f"--{flag}")
     configure.add_argument("--extra-model-path", action="append", dest="extra_model_paths")
     doctor = commands.add_parser("doctor", help="Read-only dependency and model checks")
-    doctor.add_argument("--feature", choices=["relight"], default="relight")
+    doctor.add_argument("--feature", choices=list(FEATURES), default="relight")
     doctor.add_argument("--all", action="store_true")
-    doctor.add_argument("--mode", choices=["flash", "standard"], default="flash")
+    doctor.add_argument("--mode", choices=["flash", "standard"])
     doctor.add_argument("--json", action="store_true")
     doctor.add_argument("--verify-hashes", action="store_true")
     models = commands.add_parser("models", help="List pinned public model downloads")
     models.add_argument("--json", action="store_true")
+    models.add_argument("--feature", choices=list(FEATURES), default="relight")
     run = commands.add_parser("run", help="Submit to a running local studio")
-    run.add_argument("feature", choices=["relight"])
+    run.add_argument("feature", choices=list(FEATURES))
     run.add_argument("--server", default="http://127.0.0.1:7870")
     run.add_argument("--input", type=Path, required=True)
     run.add_argument("--direction", default="front")
@@ -50,7 +52,7 @@ def parser():
     run.add_argument("--softness", default="soft")
     run.add_argument("--brightness", type=int, default=50)
     run.add_argument("--color", default="#ffffff")
-    run.add_argument("--mode", default="flash")
+    run.add_argument("--mode", choices=["flash", "standard"])
     run.add_argument("--seed", type=int, default=0)
     run.add_argument(
         "--request-id", default=None, help="Reuse for an explicit retry of the same request"
@@ -84,9 +86,7 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         if args.command == "models":
-            from .features.relight.manifest import MODELS
-
-            models = [asdict(m) | {"url": m.url} for m in MODELS]
+            models = [asdict(m) | {"url": m.url} for m in get_feature(args.feature).manifest.MODELS]
             if args.json:
                 emit(models)
             else:
@@ -109,14 +109,20 @@ def main(argv=None):
         if args.command == "doctor":
             from .comfy.doctor import diagnose
 
-            report = asyncio.run(diagnose(config, args.mode, args.verify_hashes))
+            reports = [
+                asyncio.run(diagnose(config, args.mode, args.verify_hashes, feature=feature))
+                for feature in (FEATURES if args.all else [args.feature])
+            ]
             if args.json:
-                emit(report)
+                emit(reports if args.all else reports[0])
             else:
-                for check in report["checks"]:
-                    print(f"{check['status'].upper():4} {check['name']}: {check['message']}")
-                print("Ready" if report["ready"] else "Setup needs attention")
-            return 0 if report["ready"] else 1
+                for report in reports:
+                    if args.all:
+                        print(get_feature(report["feature"]).name)
+                    for check in report["checks"]:
+                        print(f"{check['status'].upper():4} {check['name']}: {check['message']}")
+                    print("Ready" if report["ready"] else "Setup needs attention")
+            return 0 if all(report["ready"] for report in reports) else 1
         if args.command == "serve":
             import uvicorn
 
@@ -177,13 +183,15 @@ def main(argv=None):
                 return 0
             from .core.assets import MAX_INPUT_BYTES
             from .core.store import TERMINAL
-            from .features.relight.settings import RelightSettings
 
-            settings = RelightSettings(
-                **{k: getattr(args, k) for k in RelightSettings.model_fields}
+            feature = get_feature(args.feature)
+            settings = feature.parse_settings(
+                {
+                    k: getattr(args, k)
+                    for k in feature.settings.model_fields
+                    if getattr(args, k) is not None
+                }
             )
-            if settings.mode != "flash":
-                raise ValueError("Standard is not validated. Select Flash.")
             if args.input.stat().st_size > MAX_INPUT_BYTES:
                 raise ValueError("Input exceeds the 32 MB upload limit")
             key = args.request_id or str(uuid.uuid4())
@@ -197,6 +205,7 @@ def main(argv=None):
                 "POST",
                 base + "/api/jobs",
                 json={
+                    "feature": feature.id,
                     "source_id": asset["id"],
                     "settings": settings.model_dump(),
                     "request_id": key,

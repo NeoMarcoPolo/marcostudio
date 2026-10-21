@@ -9,9 +9,7 @@ from comfy_low.errors import ApiError
 
 from ..comfy.doctor import diagnose
 from ..config import Settings
-from ..features.relight.manifest import MODELS, SOURCE_REVISION, SOURCE_SHA256, WORKFLOW_VERSION
-from ..features.relight.settings import RelightSettings
-from ..features.relight.workflow import compile_workflow
+from ..features import get_feature
 from .assets import Assets
 from .store import TERMINAL, Store, now
 
@@ -30,25 +28,23 @@ class JobService:
                 return
             submitted = False
             try:
-                settings = RelightSettings(**job["settings"])
-                compile_workflow(settings, "source.png", job["output_prefix"], {})
-                report = readiness or await diagnose(self.config, settings.mode)
+                feature = get_feature(job["feature"])
+                settings = feature.parse_settings(job["settings"])
+                report = readiness or await diagnose(self.config, settings.mode, feature=feature.id)
                 if not report["ready"]:
                     failures = [c["message"] for c in report["checks"] if c["status"] == "fail"]
                     raise ValueError("Setup needs attention: " + "; ".join(failures))
                 content = await asyncio.to_thread(self.assets.path(job["source_id"]).read_bytes)
                 reference = await self.transport.upload(content, f"{job['source_id']}.png")
-                graph = compile_workflow(
-                    settings, reference, job["output_prefix"], report["models"]
-                )
+                graph = feature.compile(settings, reference, job["output_prefix"], report["models"])
                 receipt = {
-                    "workflow_version": WORKFLOW_VERSION,
-                    "source_revision": SOURCE_REVISION,
-                    "source_workflow_sha256": SOURCE_SHA256,
+                    "feature": feature.id,
+                    "workflow_version": feature.manifest.WORKFLOW_VERSION,
+                    "source_revision": feature.manifest.SOURCE_REVISION,
+                    "source_workflow_sha256": feature.manifest.SOURCE_SHA256,
                     "settings": settings.model_dump(),
                     "requested_mode": settings.mode,
-                    "effective_mode": "flash",
-                    "vector": settings.vector(),
+                    "effective_mode": settings.mode,
                     "prompt": settings.prompt(),
                     "graph": graph,
                     "graph_sha256": hashlib.sha256(
@@ -59,12 +55,14 @@ class JobService:
                             "expected_sha256": m.sha256,
                             **report.get("identities", {}).get(m.key, {}),
                         }
-                        for m in MODELS
+                        for m in feature.manifest.MODELS
                     },
                     "source_id": job["source_id"],
                     "created_at": job["created_at"],
                     "runtime": report.get("runtime", {}),
                 }
+                if feature.id == "relight":
+                    receipt["vector"] = settings.vector()
                 self.store.write_receipt(job_id, receipt)
                 self.store.update_job(
                     job_id,
@@ -125,7 +123,7 @@ class JobService:
                     data = await self.transport.output(output, job["upstream_id"])
                     assets.append(
                         await asyncio.to_thread(
-                            self.assets.add, data, f"relight-{job_id[:8]}.png", output=True
+                            self.assets.add, data, f"{job['feature']}-{job_id[:8]}.png", output=True
                         )
                     )
                 stamp = now()

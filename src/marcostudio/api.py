@@ -18,13 +18,14 @@ from .core.assets import MAX_INPUT_BYTES
 from .core.jobs import JobService
 from .core.lock import RuntimeLock
 from .core.store import TERMINAL, Store
-from .features.relight.settings import RelightSettings
+from .features import FEATURES, get_feature
 
 
 class NewJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_id: str
-    settings: RelightSettings
+    feature: str = "relight"
+    settings: dict
     request_id: str = Field(min_length=1, max_length=128)
 
 
@@ -104,11 +105,12 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
     async def features():
         return [
             {
-                "id": "relight",
-                "name": "Relight",
-                "supported_modes": ["flash"],
-                "defaults": RelightSettings().model_dump(),
+                "id": feature.id,
+                "name": feature.name,
+                "supported_modes": feature.modes,
+                "defaults": feature.settings().model_dump(),
             }
+            for feature in FEATURES.values()
         ]
 
     @app.get("/api/settings")
@@ -138,10 +140,14 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
         return current_settings()
 
     @app.get("/api/doctor")
-    async def doctor(mode: str = "flash"):
-        if mode not in {"flash", "standard"}:
+    async def doctor(mode: str | None = None, feature: str = "relight"):
+        if mode is not None and mode not in {"flash", "standard"}:
             raise HTTPException(422, "Unknown mode")
-        return await diagnose(app.state.config, mode)
+        try:
+            get_feature(feature)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return await diagnose(app.state.config, mode, feature=feature)
 
     @app.post("/api/assets", status_code=201)
     async def upload(file: UploadFile):
@@ -165,18 +171,22 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
     async def jobs():
         return app.state.store.jobs()
 
-    def enqueue(source_id, settings, request_id):
-        if settings.mode != "flash":
-            raise HTTPException(422, "Standard is not validated. Select Flash.")
+    def enqueue(source_id, settings, request_id, feature_id="relight"):
         try:
-            return app.state.store.create_job(source_id, settings.model_dump(), request_id)
+            settings = get_feature(feature_id).parse_settings(settings)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        try:
+            return app.state.store.create_job(
+                source_id, settings.model_dump(), request_id, feature=feature_id
+            )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
     @app.post("/api/jobs", status_code=201)
     async def submit(body: NewJob):
         async with service().lock:
-            return enqueue(body.source_id, body.settings, body.request_id)
+            return enqueue(body.source_id, body.settings, body.request_id, body.feature)
 
     @app.get("/api/jobs/{job_id}")
     async def job(job_id: str):
@@ -194,7 +204,7 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
         async with service().lock:
             recorded = app.state.store.job(job_id)
             return enqueue(
-                recorded["source_id"], RelightSettings(**recorded["settings"]), body.request_id
+                recorded["source_id"], recorded["settings"], body.request_id, recorded["feature"]
             )
 
     @app.post("/api/jobs/{job_id}/resolve")

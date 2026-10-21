@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from ..config import Settings, expanded_path
-from ..features.relight.manifest import Model
+from ..features.models import Model
 
 CATEGORIES = {
     "diffusion_models": ["unet", "diffusion_models"],

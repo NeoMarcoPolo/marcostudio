@@ -14,8 +14,10 @@ import {
   type Direction,
   type Doctor,
   type Feature,
+  type FeatureId,
   type Job,
   type RelightSettings,
+  type RemoveBackgroundSettings,
   type StudioSettings,
 } from "./api";
 import { SettingsDialog } from "./SettingsDialog";
@@ -67,8 +69,14 @@ const activityLabel = (status: string) =>
   })[status] ?? label(status);
 
 export default function App() {
-  const [feature, setFeature] = useState<Feature>();
+  const [features, setFeatures] = useState<Feature[]>([]);
+  const [featureId, setFeatureId] = useState<FeatureId>("relight");
   const [settings, setSettings] = useState(initial);
+  const [backgroundSettings, setBackgroundSettings] =
+    useState<RemoveBackgroundSettings>({ mode: "standard", seed: 0 });
+  const feature = features.find((item) => item.id === featureId);
+  const isRelight = featureId === "relight";
+  const toolSettings = isRelight ? settings : backgroundSettings;
   const [studio, setStudio] = useState<StudioSettings>();
   const [doctor, setDoctor] = useState<Doctor>();
   const [checking, setChecking] = useState(true);
@@ -89,16 +97,20 @@ export default function App() {
   const alive = useRef(true);
   const sourceSequence = useRef(0);
   const sourceMutation = useRef(false);
+  const doctorSequence = useRef(0);
   const job = jobs.find((item) => item.id === selected);
   const result = job?.status === "succeeded" ? job.outputs[0] : undefined;
   const selectedActive = !!job && active(job);
-  const activeJob = jobs.find((item) => item.status === "running") ?? jobs.find(active);
+  const activeJob =
+    jobs.find((item) => item.status === "running") ?? jobs.find(active);
   const uncertainJob = jobs.some((item) => item.status === "needs_attention");
   const sourceBusy = uploading || posting || loadingSelection || resolving;
-  const validSeed = Number.isSafeInteger(settings.seed) && settings.seed >= 0;
+  const validSeed =
+    Number.isSafeInteger(toolSettings.seed) && toolSettings.seed >= 0;
   const enabled =
     doctor?.ready &&
-    feature?.supported_modes.includes("flash") &&
+    !checking &&
+    feature?.supported_modes.includes(toolSettings.mode) &&
     source &&
     validSeed &&
     !sourceBusy &&
@@ -114,17 +126,39 @@ export default function App() {
       ),
     [],
   );
-  const refreshDoctor = useCallback(async () => {
-    setChecking(true);
-    try {
-      setDoctor(await api<Doctor>("/api/doctor?mode=flash"));
-    } catch (e) {
+  const refreshDoctor = useCallback(
+    async (signal?: AbortSignal) => {
+      const sequence = ++doctorSequence.current;
+      setChecking(true);
       setDoctor(undefined);
-      setError(message(e));
-    } finally {
-      setChecking(false);
-    }
-  }, []);
+      try {
+        const report = await api<Doctor>(`/api/doctor?feature=${featureId}`, {
+          signal,
+        });
+        if (
+          alive.current &&
+          !signal?.aborted &&
+          sequence === doctorSequence.current
+        )
+          setDoctor(report);
+      } catch (e) {
+        if (
+          alive.current &&
+          !signal?.aborted &&
+          sequence === doctorSequence.current
+        )
+          setError(message(e));
+      } finally {
+        if (
+          alive.current &&
+          !signal?.aborted &&
+          sequence === doctorSequence.current
+        )
+          setChecking(false);
+      }
+    },
+    [featureId],
+  );
   const closeSettings = useCallback(() => setShowSettings(false), []);
   useEffect(() => {
     alive.current = true;
@@ -133,22 +167,25 @@ export default function App() {
       const results = await Promise.allSettled([
         api<Feature[]>("/api/features", { signal: controller.signal }),
         api<StudioSettings>("/api/settings", { signal: controller.signal }),
-        api<Doctor>("/api/doctor?mode=flash", { signal: controller.signal }),
         api<Job[]>("/api/jobs", { signal: controller.signal }),
       ]);
       if (controller.signal.aborted) return;
-      const [features, configuration, readiness, history] = results;
+      const [features, configuration, history] = results;
       if (features.status === "fulfilled") {
+        setFeatures(features.value);
         const relight = features.value.find((item) => item.id === "relight");
-        setFeature(relight);
-        if (relight) setSettings({ ...relight.defaults, mode: "flash" });
+        if (relight && "direction" in relight.defaults)
+          setSettings(relight.defaults);
+        const background = features.value.find(
+          (item) => item.id === "remove-background",
+        );
+        if (background?.defaults.mode === "standard")
+          setBackgroundSettings(background.defaults);
       }
       if (configuration.status === "fulfilled") setStudio(configuration.value);
-      if (readiness.status === "fulfilled") setDoctor(readiness.value);
       if (history.status === "fulfilled") setJobs(history.value);
       const failure = results.find((item) => item.status === "rejected");
       if (failure?.status === "rejected") setError(message(failure.reason));
-      setChecking(false);
     };
     void load();
     return () => {
@@ -156,6 +193,21 @@ export default function App() {
       controller.abort();
     };
   }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void refreshDoctor(controller.signal);
+    return () => controller.abort();
+  }, [refreshDoctor]);
+  const switchTool = (id: FeatureId) => {
+    if (busy.current || sourceMutation.current || retry || id === featureId)
+      return;
+    setFeatureId(id);
+    setDoctor(undefined);
+    setChecking(true);
+    setSelected(undefined);
+    setResolveFor(undefined);
+    setView("result");
+  };
   const activeIds = jobs
     .filter(active)
     .map((item) => item.id)
@@ -242,14 +294,15 @@ export default function App() {
       void submit({
         url: "/api/jobs",
         body: {
+          feature: featureId,
           source_id: source!.id,
-          settings,
+          settings: toolSettings,
           request_id: crypto.randomUUID(),
         },
       });
   };
   const openJob = async (item: Job) => {
-    if (busy.current || sourceMutation.current) return;
+    if (busy.current || sourceMutation.current || retry) return;
     sourceMutation.current = true;
     setLoadingSelection(true);
     setError("");
@@ -264,7 +317,14 @@ export default function App() {
         sequence === sourceSequence.current
       ) {
         setSource(asset);
-        setSettings(item.settings);
+        if (item.feature !== featureId) {
+          setFeatureId(item.feature);
+          setDoctor(undefined);
+          setChecking(true);
+        }
+        if (item.feature === "remove-background")
+          setBackgroundSettings(item.settings);
+        else setSettings(item.settings);
         setSelected(item.id);
         setResolveFor(undefined);
         setView("result");
@@ -364,9 +424,21 @@ export default function App() {
         </div>
       </header>
       <main>
+        <nav className="tool-navigation" aria-label="Tools">
+          {features.map((item) => (
+            <button
+              key={item.id}
+              aria-pressed={item.id === featureId}
+              disabled={sourceBusy || !!retry}
+              onClick={() => switchTool(item.id)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </nav>
         <div className="page-heading">
           <div>
-            <h1>Relight</h1>
+            <h1>{feature?.name ?? "Relight"}</h1>
           </div>
           <div
             className={`service-state ${!activeJob && !posting && doctor?.ready ? "ready" : ""}`}
@@ -439,7 +511,7 @@ export default function App() {
               </div>
               <span className="canvas-meta">
                 {source
-                  ? `${source.width} × ${source.height}`
+                  ? `${(result ?? source).width} × ${(result ?? source).height}`
                   : null}
               </span>
             </div>
@@ -476,6 +548,10 @@ export default function App() {
                       alt={`Source: ${source.filename}`}
                       width={source.width}
                       height={source.height}
+                      style={{
+                        visibility:
+                          result && view === "result" ? "hidden" : undefined,
+                      }}
                     />
                     {result && (
                       <img
@@ -500,7 +576,9 @@ export default function App() {
                           <span aria-hidden="true">↔</span>
                         </div>
                         <span className="image-badge before">Original</span>
-                        <span className="image-badge after">Relit</span>
+                        <span className="image-badge after">
+                          {isRelight ? "Relit" : "Cutout"}
+                        </span>
                       </>
                     )}
                   </div>
@@ -580,7 +658,7 @@ export default function App() {
                   value={comparison}
                   onChange={(e) => setComparison(Number(e.target.value))}
                 />
-                <span>Relit</span>
+                <span>{isRelight ? "Relit" : "Cutout"}</span>
               </div>
             )}
             {job && (
@@ -652,221 +730,242 @@ export default function App() {
               </div>
             )}
           </section>
-          <aside className="controls" aria-label="Light controls">
-            <div className="panel-title">
-              <h2>Light settings</h2>
-              <span aria-hidden="true">✦</span>
-            </div>
-            <div className="control-section">
-              <div className="control-heading">
-                <h3>Direction</h3>
-              </div>
-              <div
-                className="direction-pad"
-                role="group"
-                aria-label="Light direction"
-              >
-                <span className="axis-h" />
-                <span className="axis-v" />
-                <div className="direction-orb" />
-                <div
-                  className="drag-surface"
-                  role="slider"
-                  tabIndex={0}
-                  aria-label="Drag light direction"
-                  aria-valuemin={-180}
-                  aria-valuemax={180}
-                  aria-valuenow={azimuth}
-                  aria-valuetext={`Azimuth ${azimuth} degrees, elevation ${elevation} degrees`}
-                  onPointerDown={(event) => {
-                    event.currentTarget.setPointerCapture?.(event.pointerId);
-                    point(event);
-                  }}
-                  onPointerMove={(event) => {
-                    if (event.buttons === 1) point(event);
-                  }}
-                  onKeyDown={(event) => {
-                    if (
-                      [
-                        "ArrowLeft",
-                        "ArrowRight",
-                        "ArrowUp",
-                        "ArrowDown",
-                      ].includes(event.key)
-                    ) {
-                      event.preventDefault();
-                      custom(
-                        azimuth +
-                          (event.key === "ArrowRight"
-                            ? 10
-                            : event.key === "ArrowLeft"
-                              ? -10
-                              : 0),
-                        elevation +
-                          (event.key === "ArrowUp"
-                            ? 10
-                            : event.key === "ArrowDown"
-                              ? -10
-                              : 0),
-                      );
-                    }
-                  }}
-                >
-                  <span
-                    className="light-handle"
-                    style={{
-                      left: `${((azimuth + 180) / 360) * 100}%`,
-                      top: `${((90 - elevation) / 180) * 100}%`,
-                    }}
-                  />
+          <aside
+            className="controls"
+            aria-label={isRelight ? "Light controls" : "Background removal"}
+          >
+            {isRelight ? (
+              <>
+                <div className="panel-title">
+                  <h2>Light settings</h2>
+                  <span aria-hidden="true">✦</span>
                 </div>
-                <span className="pad-caption">DRAG TO POSITION LIGHT</span>
-              </div>
-              <div className="direction-presets">
-                {presets.map((item) => (
-                  <button
-                    key={item.direction}
-                    aria-pressed={settings.direction === item.direction}
-                    onClick={() =>
-                      setSettings((previous) => {
-                        const {
-                          azimuth: _a,
-                          elevation: _e,
-                          ...rest
-                        } = previous;
-                        return { ...rest, direction: item.direction };
-                      })
-                    }
+                <div className="control-section">
+                  <div className="control-heading">
+                    <h3>Direction</h3>
+                  </div>
+                  <div
+                    className="direction-pad"
+                    role="group"
+                    aria-label="Light direction"
                   >
-                    <span aria-hidden="true">{item.symbol}</span>
-                    {item.name}
-                  </button>
-                ))}
-              </div>
-              <details className="angle-details">
-                <summary>
-                  Custom direction{" "}
-                  <span>
-                    {azimuth}° / {elevation}°
-                  </span>
-                </summary>
-                <label>
-                  Azimuth
+                    <span className="axis-h" />
+                    <span className="axis-v" />
+                    <div className="direction-orb" />
+                    <div
+                      className="drag-surface"
+                      role="slider"
+                      tabIndex={0}
+                      aria-label="Drag light direction"
+                      aria-valuemin={-180}
+                      aria-valuemax={180}
+                      aria-valuenow={azimuth}
+                      aria-valuetext={`Azimuth ${azimuth} degrees, elevation ${elevation} degrees`}
+                      onPointerDown={(event) => {
+                        event.currentTarget.setPointerCapture?.(
+                          event.pointerId,
+                        );
+                        point(event);
+                      }}
+                      onPointerMove={(event) => {
+                        if (event.buttons === 1) point(event);
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          [
+                            "ArrowLeft",
+                            "ArrowRight",
+                            "ArrowUp",
+                            "ArrowDown",
+                          ].includes(event.key)
+                        ) {
+                          event.preventDefault();
+                          custom(
+                            azimuth +
+                              (event.key === "ArrowRight"
+                                ? 10
+                                : event.key === "ArrowLeft"
+                                  ? -10
+                                  : 0),
+                            elevation +
+                              (event.key === "ArrowUp"
+                                ? 10
+                                : event.key === "ArrowDown"
+                                  ? -10
+                                  : 0),
+                          );
+                        }
+                      }}
+                    >
+                      <span
+                        className="light-handle"
+                        style={{
+                          left: `${((azimuth + 180) / 360) * 100}%`,
+                          top: `${((90 - elevation) / 180) * 100}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="pad-caption">DRAG TO POSITION LIGHT</span>
+                  </div>
+                  <div className="direction-presets">
+                    {presets.map((item) => (
+                      <button
+                        key={item.direction}
+                        aria-pressed={settings.direction === item.direction}
+                        onClick={() =>
+                          setSettings((previous) => {
+                            const {
+                              azimuth: _a,
+                              elevation: _e,
+                              ...rest
+                            } = previous;
+                            return { ...rest, direction: item.direction };
+                          })
+                        }
+                      >
+                        <span aria-hidden="true">{item.symbol}</span>
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
+                  <details className="angle-details">
+                    <summary>
+                      Custom direction{" "}
+                      <span>
+                        {azimuth}° / {elevation}°
+                      </span>
+                    </summary>
+                    <label>
+                      Azimuth
+                      <input
+                        aria-label="Azimuth"
+                        type="range"
+                        min="-180"
+                        max="180"
+                        step="1"
+                        value={azimuth}
+                        onChange={(e) =>
+                          custom(Number(e.target.value), elevation)
+                        }
+                      />
+                    </label>
+                    <label>
+                      Elevation
+                      <input
+                        aria-label="Elevation"
+                        type="range"
+                        min="-90"
+                        max="90"
+                        step="1"
+                        value={elevation}
+                        onChange={(e) =>
+                          custom(azimuth, Number(e.target.value))
+                        }
+                      />
+                    </label>
+                  </details>
+                </div>
+                <div className="control-section">
+                  <h3>Softness</h3>
+                  <div className="segmented">
+                    {(["soft", "hard"] as const).map((value) => (
+                      <button
+                        key={value}
+                        aria-pressed={settings.softness === value}
+                        onClick={() =>
+                          setSettings((previous) => ({
+                            ...previous,
+                            softness: value,
+                          }))
+                        }
+                      >
+                        <span aria-hidden="true">
+                          {value === "soft" ? "◌" : "◍"}
+                        </span>
+                        {value === "soft" ? "Soft" : "Hard"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="control-section">
+                  <label className="control-heading" htmlFor="brightness">
+                    <strong>Brightness</strong>
+                    <span className="brightness-value">
+                      {settings.brightness}%
+                    </span>
+                  </label>
                   <input
-                    aria-label="Azimuth"
+                    id="brightness"
+                    aria-label="Brightness"
                     type="range"
-                    min="-180"
-                    max="180"
-                    step="1"
-                    value={azimuth}
-                    onChange={(e) => custom(Number(e.target.value), elevation)}
-                  />
-                </label>
-                <label>
-                  Elevation
-                  <input
-                    aria-label="Elevation"
-                    type="range"
-                    min="-90"
-                    max="90"
-                    step="1"
-                    value={elevation}
-                    onChange={(e) => custom(azimuth, Number(e.target.value))}
-                  />
-                </label>
-              </details>
-            </div>
-            <div className="control-section">
-              <h3>Softness</h3>
-              <div className="segmented">
-                {(["soft", "hard"] as const).map((value) => (
-                  <button
-                    key={value}
-                    aria-pressed={settings.softness === value}
-                    onClick={() =>
+                    min="10"
+                    max="100"
+                    step="10"
+                    value={settings.brightness}
+                    onChange={(e) =>
                       setSettings((previous) => ({
                         ...previous,
-                        softness: value,
+                        brightness: Number(e.target.value),
                       }))
                     }
-                  >
-                    <span aria-hidden="true">
-                      {value === "soft" ? "◌" : "◍"}
-                    </span>
-                    {value === "soft" ? "Soft" : "Hard"}
-                  </button>
-                ))}
+                  />
+                  <div className="range-labels">
+                    <span>Subtle</span>
+                    <span>Vivid</span>
+                  </div>
+                </div>
+                <div className="control-section color-row">
+                  <label htmlFor="light-color">
+                    <strong>Light color</strong>
+                  </label>
+                  <div className="color-input">
+                    <input
+                      id="light-color"
+                      aria-label="Light color"
+                      type="color"
+                      value={settings.color}
+                      onChange={(e) =>
+                        setSettings((previous) => ({
+                          ...previous,
+                          color: e.target.value,
+                        }))
+                      }
+                    />
+                    <span>{settings.color.toUpperCase()}</span>
+                  </div>
+                </div>
+                <div className="control-section seed-row">
+                  <label htmlFor="seed">
+                    <strong>Seed</strong>
+                  </label>
+                  <input
+                    id="seed"
+                    aria-label="Seed"
+                    type="number"
+                    min="0"
+                    max={Number.MAX_SAFE_INTEGER}
+                    step="1"
+                    value={Number.isNaN(settings.seed) ? "" : settings.seed}
+                    onChange={(e) =>
+                      setSettings((previous) => ({
+                        ...previous,
+                        seed:
+                          e.target.value === "" ? NaN : Number(e.target.value),
+                      }))
+                    }
+                  />
+                </div>
+                {!validSeed && (
+                  <p className="field-error">
+                    Use a nonnegative whole number up to{" "}
+                    {Number.MAX_SAFE_INTEGER}.
+                  </p>
+                )}
+              </>
+            ) : (
+              <div className="panel-title">
+                <h2>Transparent PNG</h2>
               </div>
-            </div>
-            <div className="control-section">
-              <label className="control-heading" htmlFor="brightness">
-                <strong>Brightness</strong>
-                <span className="brightness-value">{settings.brightness}%</span>
-              </label>
-              <input
-                id="brightness"
-                aria-label="Brightness"
-                type="range"
-                min="10"
-                max="100"
-                step="10"
-                value={settings.brightness}
-                onChange={(e) =>
-                  setSettings((previous) => ({
-                    ...previous,
-                    brightness: Number(e.target.value),
-                  }))
-                }
-              />
-              <div className="range-labels">
-                <span>Subtle</span>
-                <span>Vivid</span>
-              </div>
-            </div>
-            <div className="control-section color-row">
-              <label htmlFor="light-color">
-                <strong>Light color</strong>
-              </label>
-              <div className="color-input">
-                <input
-                  id="light-color"
-                  aria-label="Light color"
-                  type="color"
-                  value={settings.color}
-                  onChange={(e) =>
-                    setSettings((previous) => ({
-                      ...previous,
-                      color: e.target.value,
-                    }))
-                  }
-                />
-                <span>{settings.color.toUpperCase()}</span>
-              </div>
-            </div>
-            <div className="control-section seed-row">
-              <label htmlFor="seed">
-                <strong>Seed</strong>
-              </label>
-              <input
-                id="seed"
-                aria-label="Seed"
-                type="number"
-                min="0"
-                max={Number.MAX_SAFE_INTEGER}
-                step="1"
-                value={Number.isNaN(settings.seed) ? "" : settings.seed}
-                onChange={(e) =>
-                  setSettings((previous) => ({
-                    ...previous,
-                    seed: e.target.value === "" ? NaN : Number(e.target.value),
-                  }))
-                }
-              />
-            </div>
-            {!validSeed && (
-              <p className="field-error">
-                Use a nonnegative whole number up to {Number.MAX_SAFE_INTEGER}.
-              </p>
             )}
             <div className="generate-area">
               <div className="generate-row">
@@ -880,27 +979,32 @@ export default function App() {
                     ? "Submitting…"
                     : selectedActive
                       ? activityLabel(job!.status)
-                      : "Generate"}
+                      : isRelight
+                        ? "Generate"
+                        : "Remove background"}
                 </button>
-                <div className="flash-control">
-                  <button
-                    role="switch"
-                    aria-label="Flash"
-                    aria-checked={settings.mode === "flash"}
-                    disabled={!feature?.supported_modes.includes("standard")}
-                  >
-                    <span className="switch-track">
-                      <span />
-                    </span>
-                    Flash
-                  </button>
-                </div>
+                {isRelight && (
+                  <div className="flash-control">
+                    <button
+                      role="switch"
+                      aria-label="Flash"
+                      aria-checked={settings.mode === "flash"}
+                      disabled={!feature?.supported_modes.includes("standard")}
+                    >
+                      <span className="switch-track">
+                        <span />
+                      </span>
+                      Flash
+                    </button>
+                  </div>
+                )}
               </div>
               {job && (
                 <button
                   className="regenerate-button"
                   disabled={
                     !doctor?.ready ||
+                    checking ||
                     sourceBusy ||
                     selectedActive ||
                     uncertainJob ||
@@ -940,7 +1044,7 @@ export default function App() {
                   key={item.id}
                   aria-label={`Open generation ${new Date(item.created_at).toLocaleString()} ${label(item.status)}`}
                   aria-pressed={selected === item.id}
-                  disabled={sourceBusy}
+                  disabled={sourceBusy || !!retry}
                   onClick={() => void openJob(item)}
                 >
                   {item.outputs[0] ? (
@@ -952,13 +1056,17 @@ export default function App() {
                   )}
                   <div>
                     <strong>
-                      {item.settings.direction.charAt(0).toUpperCase() +
-                        item.settings.direction.slice(1)}{" "}
-                      light
+                      {item.feature === "remove-background"
+                        ? "Remove Background"
+                        : item.settings.direction.charAt(0).toUpperCase() +
+                          item.settings.direction.slice(1) +
+                          " light"}
                     </strong>
-                    <span>
-                      {item.settings.softness} · {item.settings.brightness}%
-                    </span>
+                    {item.feature === "relight" && (
+                      <span>
+                        {item.settings.softness} · {item.settings.brightness}%
+                      </span>
+                    )}
                     <span className={`job-status ${item.status}`}>
                       {label(item.status)}
                     </span>

@@ -32,6 +32,7 @@ const output = {
   filename: "relit.png",
 };
 const job = {
+  feature: "relight",
   id: "job-1",
   status: "succeeded",
   settings: { ...defaults, direction: "right", brightness: 80 },
@@ -115,10 +116,19 @@ beforeEach(() => {
             supported_modes: ["flash"],
             defaults,
           },
+          {
+            id: "remove-background",
+            name: "Remove Background",
+            supported_modes: ["standard"],
+            defaults: { mode: "standard", seed: 0 },
+          },
         ];
       else if (url === "/api/settings") {
         if (method === "PUT")
-          studioSettings = { ...studioSettings, ...JSON.parse(String(init?.body)) };
+          studioSettings = {
+            ...studioSettings,
+            ...JSON.parse(String(init?.body)),
+          };
         data = studioSettings;
       } else if (url.startsWith("/api/doctor"))
         data = {
@@ -146,7 +156,8 @@ beforeEach(() => {
           return new Response(JSON.stringify({ detail: postError }), {
             status: 503,
           });
-        data = { ...job, settings: JSON.parse(String(init?.body)).settings };
+        const payload = JSON.parse(String(init?.body));
+        data = { ...job, feature: payload.feature, settings: payload.settings };
       } else if (url.endsWith("/cancel"))
         data = { ...job, status: "cancel_requested", outputs: [] };
       else if (url.endsWith("/resolve")) {
@@ -178,6 +189,54 @@ async function upload() {
   await screen.findByAltText("Source: portrait.png");
 }
 describe("Relight studio", () => {
+  it("submits background removal without light settings and restores its tool from history", async () => {
+    history = [
+      {
+        ...job,
+        feature: "remove-background",
+        settings: { mode: "standard", seed: 7 },
+      },
+    ];
+    render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Open generation/ }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Remove Background",
+        level: 1,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: "Flash" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Brightness")).not.toBeInTheDocument();
+    expect(screen.getByAltText("Source: portrait.png")).not.toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(screen.getByAltText("Source: portrait.png")).toBeVisible();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use as source" }),
+    );
+    const generate = screen.getByRole("button", { name: "Remove background" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    await userEvent.click(generate);
+    await waitFor(() =>
+      expect(
+        calls.filter((x) => x.url === "/api/jobs" && x.method === "POST"),
+      ).toHaveLength(1),
+    );
+    expect(
+      JSON.parse(
+        calls.find((x) => x.url === "/api/jobs" && x.method === "POST")!.body,
+      ),
+    ).toMatchObject({
+      feature: "remove-background",
+      source_id: output.id,
+      settings: { mode: "standard", seed: 7 },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Relight" }));
+    expect(screen.getByLabelText("Brightness")).toBeInTheDocument();
+  });
   it("uploads the source and submits the selected light settings only on Generate", async () => {
     render(<App />);
     await upload();
@@ -290,7 +349,9 @@ describe("Relight studio", () => {
     render(<App />);
     await screen.findByText("ComfyUI connected");
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByRole("button", { name: "Save and check" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Save and check" }),
+    ).toBeDisabled();
     expect(screen.queryByLabelText("API proxy URL")).not.toBeInTheDocument();
     const url = screen.getByLabelText("ComfyUI URL");
     await userEvent.clear(url);
@@ -305,9 +366,13 @@ describe("Relight studio", () => {
       comfy_url: "http://localhost:9999",
     });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save and check" })).toBeDisabled(),
+      expect(
+        screen.getByRole("button", { name: "Save and check" }),
+      ).toBeDisabled(),
     );
-    expect(calls.filter((x) => x.url.startsWith("/api/doctor"))).toHaveLength(2);
+    expect(calls.filter((x) => x.url.startsWith("/api/doctor"))).toHaveLength(
+      2,
+    );
     expect(
       calls.filter((x) => x.url === "/api/jobs" && x.method === "POST"),
     ).toHaveLength(0);
@@ -323,11 +388,17 @@ describe("Relight studio", () => {
     await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
     const folder = screen.getByLabelText("ComfyUI folder");
     await userEvent.clear(folder);
-    await userEvent.click(screen.getByRole("button", { name: "Save and check" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save and check" }),
+    );
     expect(calls.filter((x) => x.method === "PUT")).toHaveLength(0);
     await userEvent.type(folder, "C:\\AI\\ComfyUI");
-    await userEvent.click(screen.getByRole("button", { name: "Save and check" }));
-    await waitFor(() => expect(calls.filter((x) => x.method === "PUT")).toHaveLength(1));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save and check" }),
+    );
+    await waitFor(() =>
+      expect(calls.filter((x) => x.method === "PUT")).toHaveLength(1),
+    );
     expect(JSON.parse(calls.find((x) => x.method === "PUT")!.body)).toEqual({
       proxy_url: "http://localhost:8190",
     });
@@ -340,12 +411,16 @@ describe("Relight studio", () => {
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByLabelText("ComfyUI URL")).toBeDisabled();
     expect(screen.getByLabelText("ComfyUI folder")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save and check" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Save and check" }),
+    ).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByLabelText("API proxy URL")).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Check setup" }));
     await waitFor(() =>
-      expect(calls.filter((x) => x.url.startsWith("/api/doctor"))).toHaveLength(2),
+      expect(calls.filter((x) => x.url.startsWith("/api/doctor"))).toHaveLength(
+        2,
+      ),
     );
     expect(calls.filter((x) => x.method !== "GET")).toHaveLength(0);
   });
@@ -455,12 +530,16 @@ describe("Relight studio", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
-    expect(screen.getByLabelText("Studio status")).toHaveTextContent("Generating");
+    expect(screen.getByLabelText("Studio status")).toHaveTextContent(
+      "Generating",
+    );
     polledJob = job;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1500);
     });
-    expect(screen.getByLabelText("Studio status")).toHaveTextContent("ComfyUI connected");
+    expect(screen.getByLabelText("Studio status")).toHaveTextContent(
+      "ComfyUI connected",
+    );
     view.unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -636,7 +715,9 @@ describe("Relight studio", () => {
       screen.getByRole("button", { name: "I checked — stop tracking" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(resolutionError);
-    expect(screen.getByRole("button", { name: "Checking job status…" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Checking job status…" }),
+    ).toBeDisabled();
     expect(calls.filter((item) => item.method === "POST")).toHaveLength(1);
   });
   it("accepts an existing terminal result returned while resolving uncertainty", async () => {

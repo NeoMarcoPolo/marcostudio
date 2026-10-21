@@ -1,27 +1,9 @@
-from dataclasses import dataclass
+from ..models import Model
 
 WORKFLOW_VERSION = "qwen2509-relight-flash-v1"
 SOURCE_REVISION = "04a508b31bec1818e48122ca0761c1de4140a234"
 SOURCE_SHA256 = "bf17a8412db73407c3bc74d85db1af1ea3385a89bf51227235f5a49583fb5fca"
 SOURCE_URL = f"https://github.com/Comfy-Org/workflow_templates/blob/{SOURCE_REVISION}/templates/image_qwen_image_edit_2509_relight.json"
-
-
-@dataclass(frozen=True)
-class Model:
-    key: str
-    category: str
-    filename: str
-    size: int
-    sha256: str
-    repository: str
-    revision: str
-    path: str
-    loader: str
-    field: str
-
-    @property
-    def url(self):
-        return f"https://huggingface.co/{self.repository}/resolve/{self.revision}/{self.path}"
 
 
 MODELS = (

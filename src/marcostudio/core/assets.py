@@ -29,7 +29,8 @@ class Assets:
                     if source.width * source.height > MAX_PIXELS:
                         raise ValueError("Image exceeds the 32 megapixel limit")
                     source.load()
-                    image = ImageOps.exif_transpose(source).convert("RGB")
+                    has_alpha = "A" in source.getbands() or "transparency" in source.info
+                    image = ImageOps.exif_transpose(source).convert("RGBA" if has_alpha else "RGB")
                     normalized = io.BytesIO()
                     image.save(normalized, format="PNG")
                     width, height = image.size

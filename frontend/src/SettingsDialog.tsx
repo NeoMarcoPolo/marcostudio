@@ -16,6 +16,9 @@ const checkLabels: Record<string, string> = {
   "model:vae": "Image decoder",
   "model:lightning": "Flash adapter",
   "model:relight": "Relight adapter",
+  "model:qwen21_diffusion": "Qwen 2.1 image model",
+  "model:qwen21_encoder": "Qwen 2.1 text encoder",
+  "model:qwen21_vae": "Qwen 2.1 image decoder",
 };
 
 function CheckList({ checks }: { checks: Doctor["checks"] }) {
