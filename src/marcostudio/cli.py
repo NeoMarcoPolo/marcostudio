@@ -29,6 +29,7 @@ def parser():
     serve = commands.add_parser("serve", help="Start the local studio")
     serve.add_argument("--port", type=int, default=7870)
     commands.add_parser("proxy", help="Run the local Comfy API proxy in the foreground")
+    commands.add_parser("install-nodes", help="Install bundled video nodes in configured ComfyUI")
     configure = commands.add_parser("configure", help="Save local configuration")
     for flag in ("comfy-dir", "comfy-url", "proxy-url", "data-dir"):
         configure.add_argument(f"--{flag}")
@@ -42,10 +43,24 @@ def parser():
     models = commands.add_parser("models", help="List pinned public model downloads")
     models.add_argument("--json", action="store_true")
     models.add_argument("--feature", choices=list(FEATURES), default="relight")
+    models.add_argument("--mode", choices=["flash", "standard"])
     run = commands.add_parser("run", help="Submit to a running local studio")
     run.add_argument("feature", choices=list(FEATURES))
     run.add_argument("--server", default="http://127.0.0.1:7870")
-    run.add_argument("--input", type=Path, required=True)
+    run.add_argument("--input", type=Path)
+    run.add_argument(
+        "--asset",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Named reference input; repeat for additional references",
+    )
+    run.add_argument("--prompt", dest="instruction")
+    for field in ("width", "height", "resolution", "duration"):
+        run.add_argument(f"--{field}", type=int)
+    run.add_argument("--guide-frames", type=int, nargs="+")
+    run.add_argument("--control-type", choices=["canny", "preprocessed"])
+    run.add_argument("--strength", type=float)
     run.add_argument("--direction", default="front")
     run.add_argument("--azimuth", type=float)
     run.add_argument("--elevation", type=float)
@@ -86,7 +101,11 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         if args.command == "models":
-            models = [asdict(m) | {"url": m.url} for m in get_feature(args.feature).manifest.MODELS]
+            feature = get_feature(args.feature)
+            mode = args.mode or feature.settings().mode
+            if mode not in feature.modes:
+                raise ValueError(f"{feature.name} does not support {mode}")
+            models = [asdict(m) | {"url": m.url} for m in feature.models_for(mode)]
             if args.json:
                 emit(models)
             else:
@@ -96,6 +115,12 @@ def main(argv=None):
                     )
             return 0
         config = load_settings(args.config)
+        if args.command == "install-nodes":
+            from .comfy.install import install_nodes
+
+            destination = install_nodes(config.comfy_dir)
+            emit({"installed": str(destination), "next": "Restart ComfyUI to load the nodes"})
+            return 0
         if args.command == "configure":
             changes = {
                 k: getattr(args, k)
@@ -183,30 +208,54 @@ def main(argv=None):
                 return 0
             from .core.assets import MAX_INPUT_BYTES
             from .core.store import TERMINAL
+            from .core.video import MAX_VIDEO_BYTES
 
             feature = get_feature(args.feature)
             settings = feature.parse_settings(
                 {
                     k: getattr(args, k)
                     for k in feature.settings.model_fields
-                    if getattr(args, k) is not None
+                    if getattr(args, k, None) is not None
                 }
             )
-            if args.input.stat().st_size > MAX_INPUT_BYTES:
-                raise ValueError("Input exceeds the 32 MB upload limit")
+            if feature.source_kind != "none" and not args.input:
+                raise ValueError("This tool requires --input")
+            if feature.source_kind == "none" and args.input:
+                raise ValueError("This tool takes a prompt, without --input")
+            paths = {}
+            for value in args.asset:
+                name, separator, path = value.partition("=")
+                if not separator or not path or name in paths:
+                    raise ValueError("Use one --asset NAME=PATH per input slot")
+                paths[name] = Path(path)
+            allowed = {slot["key"] for slot in feature.input_slots}
+            if paths.keys() - allowed:
+                raise ValueError(f"Unknown input slot; use one of: {', '.join(sorted(allowed))}")
+            for slot in feature.input_slots:
+                if slot["required"] and slot["key"] not in paths:
+                    raise ValueError(f"Missing --asset {slot['key']}=PATH ({slot['label']})")
+
+            def upload(path, video=False):
+                limit = MAX_VIDEO_BYTES if video else MAX_INPUT_BYTES
+                if path.stat().st_size > limit:
+                    raise ValueError(f"Input exceeds the {limit // (1024 * 1024)} MiB upload limit")
+                with path.open("rb") as source:
+                    return request(
+                        client, "POST", base + "/api/assets", files={"file": (path.name, source)}
+                    )
+
             key = args.request_id or str(uuid.uuid4())
             print(f"Request ID: {key}", file=sys.stderr)
-            with args.input.open("rb") as source:
-                asset = request(
-                    client, "POST", base + "/api/assets", files={"file": (args.input.name, source)}
-                )
+            asset = upload(args.input, feature.source_kind == "video") if args.input else None
+            references = {name: upload(path)["id"] for name, path in paths.items()}
             job = request(
                 client,
                 "POST",
                 base + "/api/jobs",
                 json={
                     "feature": feature.id,
-                    "source_id": asset["id"],
+                    "source_id": asset["id"] if asset else None,
+                    "inputs": references,
                     "settings": settings.model_dump(),
                     "request_id": key,
                 },

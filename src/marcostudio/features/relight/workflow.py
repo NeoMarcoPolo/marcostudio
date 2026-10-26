@@ -5,7 +5,12 @@ from .settings import RelightSettings
 
 
 def compile_workflow(
-    settings: RelightSettings, input_name: str, output_prefix: str, model_names: dict[str, str]
+    settings: RelightSettings,
+    input_name: str,
+    output_prefix: str,
+    model_names: dict[str, str],
+    *,
+    inputs=None,
 ) -> dict:
     if settings.mode != "flash":
         raise ValueError("Standard is not validated for this Relight profile. Use Flash.")

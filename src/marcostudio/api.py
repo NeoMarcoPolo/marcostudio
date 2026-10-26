@@ -14,16 +14,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .comfy.doctor import diagnose
 from .comfy.transport import ComfyTransport
 from .config import Settings, local_url, save_settings
-from .core.assets import MAX_INPUT_BYTES
 from .core.jobs import JobService
 from .core.lock import RuntimeLock
 from .core.store import TERMINAL, Store
+from .core.video import MAX_VIDEO_BYTES
 from .features import FEATURES, get_feature
 
 
 class NewJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    source_id: str
+    source_id: str | None = None
+    inputs: dict[str, str] = Field(default_factory=dict, max_length=12)
     feature: str = "relight"
     settings: dict
     request_id: str = Field(min_length=1, max_length=128)
@@ -95,10 +96,30 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
     def service():
         return app.state.service
 
+    def restorable_connection(jobs=None):
+        if jobs is None:
+            jobs = [j for j in app.state.store.jobs() if j["status"] not in TERMINAL]
+        submitted = [j for j in jobs if j["status"] != "preparing"]
+        targets = {
+            ((j.get("backend") or {}).get("comfy_url"), (j.get("backend") or {}).get("proxy_url"))
+            for j in submitted
+        }
+        if len(targets) != 1:
+            return None
+        comfy_url, proxy_url = targets.pop()
+        if (
+            not comfy_url
+            or not proxy_url
+            or (comfy_url == app.state.config.comfy_url and proxy_url == app.state.config.proxy_url)
+        ):
+            return None
+        return {"comfy_url": comfy_url, "proxy_url": proxy_url}
+
     def current_settings():
         conf = app.state.config.model_dump(mode="json")
         return {k: conf[k] for k in ("comfy_url", "proxy_url", "comfy_dir", "data_dir")} | {
-            "transport": "Comfy SDK + local API proxy"
+            "transport": "Comfy SDK + local API proxy",
+            "restore_connection": restorable_connection(),
         }
 
     @app.get("/api/features")
@@ -109,6 +130,10 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
                 "name": feature.name,
                 "supported_modes": feature.modes,
                 "defaults": feature.settings().model_dump(),
+                "source_kind": feature.source_kind,
+                "source_label": feature.source_label,
+                "output_kind": feature.output_kind,
+                "input_slots": feature.input_slots,
             }
             for feature in FEATURES.values()
         ]
@@ -128,10 +153,13 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
         except (ValueError, ValidationError) as exc:
             raise HTTPException(422, str(exc)) from exc
         async with service().lock:
-            if any(j["status"] not in TERMINAL for j in app.state.store.jobs()):
-                raise HTTPException(
-                    409, "Finish or reconcile active jobs before changing runtime settings"
-                )
+            active_jobs = [j for j in app.state.store.jobs() if j["status"] not in TERMINAL]
+            if active_jobs:
+                restore = restorable_connection(active_jobs)
+                if not restore or updated.model_dump() != (app.state.config.model_dump() | restore):
+                    raise HTTPException(
+                        409, "Finish or reconcile active jobs before changing runtime settings"
+                    )
             save_settings(updated, config_file)
             old_transport = service().transport
             service().transport = ComfyTransport(updated)
@@ -152,7 +180,7 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
     @app.post("/api/assets", status_code=201)
     async def upload(file: UploadFile):
         try:
-            data = await file.read(MAX_INPUT_BYTES + 1)
+            data = await file.read(MAX_VIDEO_BYTES + 1)
             return await asyncio.to_thread(service().assets.add, data, file.filename or "image.png")
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -165,20 +193,38 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
 
     @app.get("/api/assets/{asset_id}")
     async def asset_bytes(asset_id: str):
-        return FileResponse(service().assets.path(asset_id), media_type="image/png")
+        asset = app.state.store.asset(asset_id)
+        return FileResponse(
+            service().assets.path(asset_id),
+            media_type=asset["media_type"],
+            filename=asset["filename"],
+            content_disposition_type="inline",
+        )
 
     @app.get("/api/jobs")
     async def jobs():
         return app.state.store.jobs()
 
-    def enqueue(source_id, settings, request_id, feature_id="relight"):
+    async def enqueue(source_id, settings, request_id, feature_id="relight", inputs=None):
+        inputs = inputs or {}
         try:
-            settings = get_feature(feature_id).parse_settings(settings)
+            feature = get_feature(feature_id)
+            settings = feature.parse_settings(settings)
+            source = (
+                await asyncio.to_thread(service().assets.metadata, source_id)
+                if source_id is not None
+                else None
+            )
+            feature.validate_assets(
+                source,
+                {key: app.state.store.asset(value) for key, value in inputs.items()},
+                settings,
+            )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         try:
             return app.state.store.create_job(
-                source_id, settings.model_dump(), request_id, feature=feature_id
+                source_id, settings.model_dump(), request_id, feature=feature_id, inputs=inputs
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -186,7 +232,9 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
     @app.post("/api/jobs", status_code=201)
     async def submit(body: NewJob):
         async with service().lock:
-            return enqueue(body.source_id, body.settings, body.request_id, body.feature)
+            return await enqueue(
+                body.source_id, body.settings, body.request_id, body.feature, body.inputs
+            )
 
     @app.get("/api/jobs/{job_id}")
     async def job(job_id: str):
@@ -203,8 +251,12 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
     async def regenerate(job_id: str, body: Regenerate):
         async with service().lock:
             recorded = app.state.store.job(job_id)
-            return enqueue(
-                recorded["source_id"], recorded["settings"], body.request_id, recorded["feature"]
+            return await enqueue(
+                recorded["source_id"],
+                recorded["settings"],
+                body.request_id,
+                recorded["feature"],
+                recorded.get("inputs", {}),
             )
 
     @app.post("/api/jobs/{job_id}/resolve")

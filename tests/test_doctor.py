@@ -105,3 +105,42 @@ async def test_unreachable_runtime_is_not_ready_and_does_not_write(tmp_path):
     assert not report["ready"]
     assert any("unreachable" in c["message"].lower() for c in report["checks"])
     assert not config.data_dir.exists()
+
+
+@pytest.mark.parametrize("capability", [None, False, True])
+@pytest.mark.asyncio
+async def test_flash_reference_requires_running_pdd_support(tmp_path, capability):
+    from marcostudio.comfy.doctor import diagnose
+    from marcostudio.config import Settings
+
+    def runtime(request):
+        if request.url.path == "/system_stats":
+            return httpx.Response(200, json={"system": {"comfyui_version": "0.41.0"}})
+        if request.url.path == "/marcostudio/capabilities" and capability is not None:
+            return httpx.Response(200, json={"version": 1, "h3_pdd": capability})
+        return httpx.Response(404, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(runtime)) as client:
+        report = await diagnose(
+            Settings(data_dir=tmp_path), "flash", client=client, feature="restyle-video"
+        )
+    check = next(c for c in report["checks"] if c["name"] == "h3_pdd")
+    assert check["status"] == ("pass" if capability is True else "fail")
+
+
+@pytest.mark.parametrize("missing", ["Canny", "VAEDecodeAudio"])
+@pytest.mark.asyncio
+async def test_motion_readiness_checks_the_unmasked_branch(tmp_path, missing):
+    from marcostudio.comfy.doctor import diagnose
+    from marcostudio.config import Settings
+
+    def runtime(request):
+        if request.url.path == "/system_stats":
+            return httpx.Response(200, json={"system": {"comfyui_version": "0.41.0"}})
+        return httpx.Response(200, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(runtime)) as client:
+        report = await diagnose(Settings(data_dir=tmp_path), client=client, feature="motion-control")
+    check = next(c for c in report["checks"] if c["name"] == f"node:{missing}")
+    assert check["status"] == "fail"
+    assert "not registered" in check["message"]

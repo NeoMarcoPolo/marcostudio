@@ -16,11 +16,31 @@ export interface RelightSettings {
   mode: "flash";
   seed: number;
 }
-export type FeatureId = "relight" | "remove-background";
+export type CreativeFeatureId = "create-image" | "edit-image" | "ai-stylist" | "product-scene"
+  | "create-video" | "animate-image" | "transition" | "restyle-video" | "character-swap" | "keyframes" | "motion-control";
+export type FeatureId = "relight" | "remove-background" | CreativeFeatureId;
+export interface CreativeSettings {
+  mode: "standard" | "flash";
+  seed: number;
+  instruction: string;
+  width: number;
+  height: number;
+  negative_prompt?: "";
+  resolution?: number;
+  duration?: number;
+  guide_frames?: number[];
+  control_type?: "canny" | "preprocessed";
+  strength?: number;
+}
 export interface RemoveBackgroundSettings {
   mode: "standard";
   seed: number;
 }
+
+export function videoFrames(duration: number) {
+  return duration * 24 + ((5 - (duration * 24) % 17 + 17) % 17);
+}
+
 export interface Asset {
   id: string;
   url: string;
@@ -28,11 +48,14 @@ export interface Asset {
   height: number;
   media_type: string;
   filename: string;
+  duration?: number;
+  fps?: number;
 }
 interface JobBase {
   id: string;
   status: string;
-  source_id: string;
+  source_id: string | null;
+  inputs?: Record<string, string>;
   outputs: Asset[];
   error: string | null;
   created_at: string;
@@ -45,12 +68,17 @@ export type Job = JobBase &
   (
     | { feature: "relight"; settings: RelightSettings }
     | { feature: "remove-background"; settings: RemoveBackgroundSettings }
+    | { feature: CreativeFeatureId; settings: CreativeSettings }
   );
 export interface Feature {
   id: FeatureId;
   name: string;
   supported_modes: string[];
-  defaults: RelightSettings | RemoveBackgroundSettings;
+  defaults: RelightSettings | RemoveBackgroundSettings | CreativeSettings;
+  source_kind?: "image" | "video" | "none";
+  source_label?: string;
+  output_kind?: "image" | "video";
+  input_slots?: {key: string; label: string; kind: "image" | "video"; required: boolean}[];
 }
 export interface StudioSettings {
   comfy_url: string;
@@ -58,10 +86,12 @@ export interface StudioSettings {
   comfy_dir: string | null;
   data_dir: string;
   transport: string;
+  restore_connection?: {comfy_url: string; proxy_url: string} | null;
 }
 export interface Doctor {
   ready: boolean;
   checks: { name: string; status: "pass" | "fail" | "warn"; message: string }[];
+  model_requirements?: {filename: string; category: string; url: string; size: number; available: boolean}[];
 }
 export class ServiceError extends Error {
   constructor(
@@ -71,7 +101,11 @@ export class ServiceError extends Error {
     super(message);
   }
 }
+let browserTransport: (<T>(url: string, init?: RequestInit) => Promise<T>) | undefined;
+export const isBrowserRuntime = () => !!browserTransport;
+export function useBrowserRuntime(transport: typeof browserTransport) { browserTransport = transport; }
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  if (browserTransport) return browserTransport<T>(url, init);
   let response: Response;
   try {
     response = await fetch(url, init);

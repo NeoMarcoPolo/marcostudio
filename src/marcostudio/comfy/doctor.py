@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import sys
 from importlib.metadata import version
 
@@ -18,23 +19,44 @@ def validate_inputs(node: dict, definition: dict):
     fields = inputs.get("required", {}) | inputs.get("optional", {})
     required = set(inputs.get("required", {}))
     # V3 autogrow sockets are serialized as dotted inputs in API workflows.
-    for field, spec in list(fields.items()):
-        if spec[0] != "COMFY_AUTOGROW_V3":
-            continue
-        template = spec[1]["template"]
-        child = next(iter(template["input"]["required"].values()))
-        names = [f"{field}.{name}" for name in template["names"]]
-        fields.pop(field)
-        required.discard(field)
-        fields.update(dict.fromkeys(names, child))
-        if sum(name in node["inputs"] for name in names) < template.get("min", 0):
-            raise ValueError(f"Too few inputs for {field}")
+    pending = list(fields)
+    while pending:
+        field = pending.pop()
+        spec = fields[field]
+        if spec[0] == "COMFY_AUTOGROW_V3":
+            template = spec[1]["template"]
+            child = next(iter(template["input"]["required"].values()))
+            names = template.get("names") or [
+                f"{template['prefix']}{i}" for i in range(template["max"])
+            ]
+            names = [f"{field}.{name}" for name in names]
+            fields.pop(field)
+            required.discard(field)
+            fields.update(dict.fromkeys(names, child))
+            if sum(name in node["inputs"] for name in names) < template.get("min", 0):
+                raise ValueError(f"Too few inputs for {field}")
+        elif spec[0] == "COMFY_DYNAMICCOMBO_V3":
+            options = {o["key"]: o.get("inputs", {}) for o in spec[1]["options"]}
+            fields[field] = ["COMBO", {"options": list(options)}]
+            selected = node["inputs"].get(field)
+            if selected is None:
+                continue
+            if not isinstance(selected, str) or selected not in options:
+                raise ValueError(f"Unsupported {field}: {selected}")
+            selected_inputs = options[selected]
+            for group in ("required", "optional"):
+                for key, value in selected_inputs.get(group, {}).items():
+                    name = f"{field}.{key}"
+                    fields[name] = value
+                    pending.append(name)
+                    if group == "required":
+                        required.add(name)
     for field in required:
         if field not in node["inputs"]:
             raise ValueError(f"Required input {field} is absent from the supported workflow")
     dynamic = {
         (m.loader, m.field) for feature in FEATURES.values() for m in feature.manifest.MODELS
-    } | {("LoadImage", "image")}
+    } | {("LoadImage", "image"), ("LoadVideo", "file")}
     for field, value in node["inputs"].items():
         if field not in fields:
             raise ValueError(f"Workflow input {field} is not supported")
@@ -103,6 +125,21 @@ async def diagnose(
     except (httpx.HTTPError, ValueError) as exc:
         record("runtime", "fail", f"ComfyUI unreachable or response invalid: {type(exc).__name__}")
 
+    if feature == "restyle-video" and mode == "flash":
+        try:
+            response = await client.get(f"{config.comfy_url}/marcostudio/capabilities")
+            response.raise_for_status()
+            capabilities = response.json()
+            if capabilities.get("version") != 1 or capabilities.get("h3_pdd") is not True:
+                raise ValueError("Update ComfyUI to a revision with MiniMax H3 PDD support, then restart it")
+            record("h3_pdd", "pass", "Running ComfyUI supports FastH3 OmniRef prediction heads")
+        except (httpx.HTTPError, ValueError, AttributeError) as exc:
+            record(
+                "h3_pdd", "fail",
+                str(exc) if isinstance(exc, ValueError) else
+                "Cannot verify FastH3 support. Run marcostudio install-nodes, then restart ComfyUI",
+            )
+
     record(
         "sdk",
         "pass",
@@ -122,8 +159,39 @@ async def diagnose(
     except (httpx.HTTPError, ValueError) as exc:
         record("proxy", "fail", f"Proxy unavailable or incompatible: {exc}")
 
-    graph = tool.compile(tool.settings(), "source.png", "readiness", {})
-    classes = sorted({n["class_type"] for n in graph.values()})
+    selected_mode = mode if mode in tool.modes else tool.modes[0]
+    sample_inputs = {s["key"]: "reference.png" for s in tool.input_slots}
+    sample_settings = {"mode": selected_mode}
+    if "guide_frames" in tool.settings.model_fields:
+        sample_settings["guide_frames"] = [24 * (index + 1) for index in range(len(sample_inputs))]
+    graph = tool.compile(
+        tool.settings(**sample_settings),
+        None
+        if tool.source_kind == "none"
+        else "source.mp4"
+        if tool.source_kind == "video"
+        else "source.png",
+        "readiness",
+        {},
+        inputs=sample_inputs,
+    )
+    nodes = list(graph.values())
+    if feature == "motion-control":
+        # Masked edits and edge-guided motion require different native nodes.
+        unmasked = tool.compile(
+            tool.settings(**sample_settings), "source.mp4", "readiness", {}, inputs={}
+        )
+        nodes.extend(unmasked.values())
+    if tool.output_kind == "video":
+        for command in ("ffmpeg", "ffprobe"):
+            record(
+                command,
+                "pass" if shutil.which(command) else "fail",
+                f"{command} is available"
+                if shutil.which(command)
+                else f"Add {command} to PATH for video tools",
+            )
+    classes = sorted({n["class_type"] for n in nodes})
     definitions = {}
     semaphore = asyncio.Semaphore(4)
 
@@ -134,10 +202,11 @@ async def diagnose(
                 response.raise_for_status()
                 definition = response.json().get(kind)
                 if not definition:
-                    record(f"node:{kind}", "fail", f"Required node is not registered: {kind}")
+                    hint = "; run marcostudio install-nodes and restart ComfyUI" if kind.startswith("MarcoStudio") else ""
+                    record(f"node:{kind}", "fail", f"Required node is not registered: {kind}{hint}")
                     return
                 definitions[kind] = definition
-                for node in (n for n in graph.values() if n["class_type"] == kind):
+                for node in (n for n in nodes if n["class_type"] == kind):
                     validate_inputs(node, definition)
                 record(f"node:{kind}", "pass", f"{kind} registered and input contract compatible")
             except (httpx.HTTPError, ValueError) as exc:
@@ -149,11 +218,14 @@ async def diagnose(
 
     if runtime:
         await asyncio.gather(*(inspect_node(kind) for kind in classes))
-    for model in tool.manifest.MODELS:
+    requirements = []
+    for model in tool.models_for(selected_mode):
+        available = False
         try:
             inputs = definitions.get(model.loader, {}).get("input", {})
             fields = inputs.get("required", {}) | inputs.get("optional", {})
-            choices = fields.get(model.field, [[]])[0]
+            spec = fields.get(model.field, [[]])
+            choices = spec[1].get("options", []) if spec[0] == "COMBO" else spec[0]
             if not isinstance(choices, list):
                 raise ValueError("Loader model choices are unavailable")
             if definitions:
@@ -164,6 +236,7 @@ async def diagnose(
             path = resolve_model(roots.get(model.category, []), name)
             identity = await asyncio.to_thread(inspect_model, path, model, verify_hashes)
             identities[model.key] = identity | {"loader_name": name}
+            available = True
             record(
                 f"model:{model.key}",
                 "pass",
@@ -172,6 +245,15 @@ async def diagnose(
             )
         except (OSError, ValueError) as exc:
             record(f"model:{model.key}", "fail", exc)
+        requirements.append(
+            {
+                "filename": model.filename,
+                "category": model.category,
+                "url": model.url,
+                "size": model.size,
+                "available": available,
+            }
+        )
     ancestor = config.data_dir
     while not ancestor.exists() and ancestor != ancestor.parent:
         ancestor = ancestor.parent
@@ -195,4 +277,5 @@ async def diagnose(
         "identities": identities,
         "mode": mode,
         "feature": feature,
+        "model_requirements": requirements,
     }

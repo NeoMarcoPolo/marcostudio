@@ -3,15 +3,17 @@ import {
   useEffect,
   useRef,
   useState,
-  type PointerEvent,
 } from "react";
 import {
   active,
   api,
   post,
   ServiceError,
+  videoFrames,
+  isBrowserRuntime,
   type Asset,
-  type Direction,
+  type CreativeFeatureId,
+  type CreativeSettings,
   type Doctor,
   type Feature,
   type FeatureId,
@@ -20,7 +22,15 @@ import {
   type RemoveBackgroundSettings,
   type StudioSettings,
 } from "./api";
+import { RelightControls } from "./RelightControls";
 import { SettingsDialog } from "./SettingsDialog";
+import { Onboarding, enteredKey } from "./Onboarding";
+import { downloadAsset } from "./browser/assets";
+import { draftAssets, savedDraft, saveDraft } from "./browser/draft";
+import { InputAssets, SourceInput, ToolControls } from "./ToolControls";
+import { MediaPreview } from "./MediaPreview";
+import { ToolNavigation, toolGroup, toolIcons } from "./ToolNavigation";
+import { Aperture, ArrowDownToLine, ArrowUpRight, ChevronRight, History, Plus, Settings2, Sparkles, Video, X } from "lucide-react";
 import "./style.css";
 
 const initial: RelightSettings = {
@@ -31,27 +41,8 @@ const initial: RelightSettings = {
   mode: "flash",
   seed: 0,
 };
-const presets: {
-  name: string;
-  direction: Direction;
-  azimuth: number;
-  elevation: number;
-  symbol: string;
-}[] = [
-  { name: "Top", direction: "top", azimuth: 0, elevation: 90, symbol: "↓" },
-  { name: "Front", direction: "front", azimuth: 0, elevation: 0, symbol: "◎" },
-  { name: "Right", direction: "right", azimuth: 90, elevation: 0, symbol: "←" },
-  { name: "Left", direction: "left", azimuth: -90, elevation: 0, symbol: "→" },
-  { name: "Back", direction: "back", azimuth: 180, elevation: 0, symbol: "◉" },
-  {
-    name: "Bottom",
-    direction: "bottom",
-    azimuth: 0,
-    elevation: -90,
-    symbol: "↑",
-  },
-];
-type Request = { url: string; body: unknown };
+
+type Submission = { url: string; body: unknown };
 const message = (error: unknown) =>
   error instanceof Error
     ? error.message
@@ -70,13 +61,29 @@ const activityLabel = (status: string) =>
 
 export default function App() {
   const [features, setFeatures] = useState<Feature[]>([]);
-  const [featureId, setFeatureId] = useState<FeatureId>("relight");
+  const [featureId, setFeatureId] = useState<FeatureId>(() => isBrowserRuntime() ? savedDraft()?.featureId ?? "relight" : "relight");
+  const [loaded, setLoaded] = useState(false);
   const [settings, setSettings] = useState(initial);
   const [backgroundSettings, setBackgroundSettings] =
     useState<RemoveBackgroundSettings>({ mode: "standard", seed: 0 });
+  const [creativeSettings, setCreativeSettings] = useState<Partial<Record<CreativeFeatureId, CreativeSettings>>>({});
+  const [inputs, setInputs] = useState<Record<string, Asset>>({});
   const feature = features.find((item) => item.id === featureId);
   const isRelight = featureId === "relight";
-  const toolSettings = isRelight ? settings : backgroundSettings;
+  const isBackground = featureId === "remove-background";
+  const creative = isRelight || isBackground ? undefined : creativeSettings[featureId];
+  const toolSettings = isRelight ? settings : isBackground ? backgroundSettings : creative ?? {mode: "standard" as const, seed: 0};
+  const sourceKind = feature?.source_kind ?? "image";
+  const hasSidePanel = isRelight || isBackground;
+  const ToolIcon = toolIcons[featureId];
+  const resultLabel = isRelight ? "Relit" : isBackground ? "Cutout" : "Result";
+  const changeCreative = (patch: Partial<CreativeSettings>) => {
+    if (featureId === "relight" || featureId === "remove-background") return;
+    setCreativeSettings(previous => {
+      const current = previous[featureId];
+      return current ? {...previous, [featureId]: {...current, ...patch}} : previous;
+    });
+  };
   const [studio, setStudio] = useState<StudioSettings>();
   const [doctor, setDoctor] = useState<Doctor>();
   const [checking, setChecking] = useState(true);
@@ -89,7 +96,7 @@ export default function App() {
   const [resolving, setResolving] = useState(false);
   const [resolveFor, setResolveFor] = useState<string>();
   const [error, setError] = useState("");
-  const [retry, setRetry] = useState<Request>();
+  const [retry, setRetry] = useState<Submission>();
   const [showSettings, setShowSettings] = useState(false);
   const [comparison, setComparison] = useState(50);
   const [view, setView] = useState<"result" | "compare">("result");
@@ -107,11 +114,17 @@ export default function App() {
   const sourceBusy = uploading || posting || loadingSelection || resolving;
   const validSeed =
     Number.isSafeInteger(toolSettings.seed) && toolSettings.seed >= 0;
+  const validInputs = feature?.input_slots?.every(slot => !slot.required || inputs[slot.key]) ?? true;
+  const needsPrompt = !isRelight && !isBackground && !["ai-stylist", "product-scene"].includes(featureId);
+  const validGuides = featureId !== "keyframes" || !!creative?.guide_frames?.every((frame, index, frames) =>
+    Number.isInteger(frame) && frame > (frames[index - 1] ?? 0) && frame < videoFrames(creative.duration ?? 5));
+  const canCompare = source?.media_type.startsWith("image/") && result?.media_type.startsWith("image/");
   const enabled =
     doctor?.ready &&
     !checking &&
     feature?.supported_modes.includes(toolSettings.mode) &&
-    source &&
+    (sourceKind === "none" || source?.media_type.startsWith(`${sourceKind}/`)) &&
+    validInputs && validGuides && (!needsPrompt || !!creative?.instruction.trim()) &&
     validSeed &&
     !sourceBusy &&
     !selectedActive &&
@@ -129,37 +142,33 @@ export default function App() {
   const refreshDoctor = useCallback(
     async (signal?: AbortSignal) => {
       const sequence = ++doctorSequence.current;
+      const isCurrent = () => alive.current && !signal?.aborted && sequence === doctorSequence.current;
       setChecking(true);
-      setDoctor(undefined);
+      if (!isBrowserRuntime()) setDoctor(undefined);
       try {
-        const report = await api<Doctor>(`/api/doctor?feature=${featureId}`, {
+        const report = await api<Doctor>(`/api/doctor?feature=${featureId}&mode=${toolSettings.mode}`, {
           signal,
         });
-        if (
-          alive.current &&
-          !signal?.aborted &&
-          sequence === doctorSequence.current
-        )
-          setDoctor(report);
+        if (isCurrent()) setDoctor(report);
       } catch (e) {
-        if (
-          alive.current &&
-          !signal?.aborted &&
-          sequence === doctorSequence.current
-        )
-          setError(message(e));
+        if (isCurrent()) setError(message(e));
       } finally {
-        if (
-          alive.current &&
-          !signal?.aborted &&
-          sequence === doctorSequence.current
-        )
-          setChecking(false);
+        if (isCurrent()) setChecking(false);
       }
     },
-    [featureId],
+    [featureId, toolSettings.mode],
   );
   const closeSettings = useCallback(() => setShowSettings(false), []);
+  useEffect(() => {
+    if (isBrowserRuntime() && studio && !checking && doctor && (!doctor.ready || !localStorage.getItem(enteredKey())))
+      setShowSettings(true);
+  }, [studio, checking, doctor, featureId, toolSettings.mode]);
+  useEffect(() => {
+    if (!isBrowserRuntime()) return;
+    const focus = () => { if (!showSettings) void refreshDoctor(); };
+    window.addEventListener("focus", focus);
+    return () => window.removeEventListener("focus", focus);
+  }, [refreshDoctor, showSettings]);
   useEffect(() => {
     alive.current = true;
     const controller = new AbortController();
@@ -180,12 +189,28 @@ export default function App() {
           (item) => item.id === "remove-background",
         );
         if (background?.defaults.mode === "standard")
-          setBackgroundSettings(background.defaults);
+          setBackgroundSettings({mode: "standard", seed: background.defaults.seed});
+        setCreativeSettings(Object.fromEntries(features.value
+          .filter(item => item.id !== "relight" && item.id !== "remove-background")
+          .map(item => [item.id, item.defaults])));
       }
       if (configuration.status === "fulfilled") setStudio(configuration.value);
       if (history.status === "fulfilled") setJobs(history.value);
       const failure = results.find((item) => item.status === "rejected");
       if (failure?.status === "rejected") setError(message(failure.reason));
+      if (isBrowserRuntime()) {
+        const draft = savedDraft();
+        if (draft) {
+          setSettings(draft.settings); setBackgroundSettings(draft.backgroundSettings);
+          setCreativeSettings(previous => ({...previous, ...draft.creativeSettings}));
+          setSelected(draft.selected);
+          try {
+            const assets = await draftAssets(draft);
+            if (!controller.signal.aborted && sourceSequence.current === 0) {setSource(assets.source); setInputs(assets.inputs);}
+          } catch { if (!controller.signal.aborted) setError("A saved input is unavailable. Add it again to continue."); }
+        }
+      }
+      if (!controller.signal.aborted) setLoaded(true);
     };
     void load();
     return () => {
@@ -193,6 +218,12 @@ export default function App() {
       controller.abort();
     };
   }, []);
+  useEffect(() => {
+    if (!isBrowserRuntime() || !loaded) return;
+    try { saveDraft({featureId, settings, backgroundSettings, creativeSettings, sourceId: source?.id,
+      inputIds: Object.fromEntries(Object.entries(inputs).map(([key, asset]) => [key, asset.id])), selected}); }
+    catch (error) { setError(message(error)); }
+  }, [loaded, featureId, settings, backgroundSettings, creativeSettings, source, inputs, selected]);
   useEffect(() => {
     const controller = new AbortController();
     void refreshDoctor(controller.signal);
@@ -202,6 +233,9 @@ export default function App() {
     if (busy.current || sourceMutation.current || retry || id === featureId)
       return;
     setFeatureId(id);
+    const kind = features.find(item => item.id === id)?.source_kind ?? "image";
+    if (kind === "none" || !source?.media_type.startsWith(`${kind}/`)) setSource(undefined);
+    setInputs({});
     setDoctor(undefined);
     setChecking(true);
     setSelected(undefined);
@@ -240,7 +274,7 @@ export default function App() {
       controller.abort();
     };
   }, [activeIds, upsert]);
-  const upload = async (file?: File) => {
+  const upload = async (file?: File, slot?: string) => {
     if (!file || busy.current || sourceMutation.current) return;
     sourceMutation.current = true;
     setError("");
@@ -254,7 +288,15 @@ export default function App() {
         body: form,
       });
       if (alive.current && sequence === sourceSequence.current) {
-        setSource(asset);
+        if (slot) {
+          setInputs(previous => ({...previous, [slot]: asset}));
+          if (featureId === "keyframes") {
+            const index = Number(slot.split("_")[1]) - 1;
+            const frames = [...(creative?.guide_frames ?? [])];
+            for (let i = frames.length; i <= index; i++) frames[i] = (frames[i - 1] ?? 24) + 24;
+            changeCreative({guide_frames: frames.slice(0, Math.max(index + 1, Object.keys(inputs).length))});
+          }
+        } else setSource(asset);
         setSelected(undefined);
         setRetry(undefined);
       }
@@ -265,7 +307,16 @@ export default function App() {
       if (alive.current) setUploading(false);
     }
   };
-  const submit = async (request: Request) => {
+  const removeInput = (key: string) => {
+    if (busy.current || sourceMutation.current) return;
+    const slots = feature?.input_slots ?? [];
+    const index = slots.findIndex(slot => slot.key === key);
+    setInputs(previous => Object.fromEntries(Object.entries(previous).filter(([name]) =>
+      slots.findIndex(slot => slot.key === name) < index)));
+    if (featureId === "keyframes") changeCreative({guide_frames: creative?.guide_frames?.slice(0, index)});
+    setSelected(undefined);
+  };
+  const submit = async (request: Submission) => {
     if (busy.current || sourceMutation.current || uncertainJob) return;
     busy.current = true;
     ++sourceSequence.current;
@@ -295,7 +346,8 @@ export default function App() {
         url: "/api/jobs",
         body: {
           feature: featureId,
-          source_id: source!.id,
+          source_id: sourceKind === "none" ? null : source!.id,
+          inputs: Object.fromEntries(Object.entries(inputs).map(([key, asset]) => [key, asset.id])),
           settings: toolSettings,
           request_id: crypto.randomUUID(),
         },
@@ -308,15 +360,18 @@ export default function App() {
     setError("");
     const sequence = ++sourceSequence.current;
     try {
-      const asset = await api<Asset>(
-        `/api/assets/${encodeURIComponent(item.source_id)}/meta`,
-      );
+      const [asset, references] = await Promise.all([
+        item.source_id ? api<Asset>(`/api/assets/${encodeURIComponent(item.source_id)}/meta`) : undefined,
+        Promise.all(Object.entries(item.inputs ?? {}).map(async ([key, id]) =>
+          [key, await api<Asset>(`/api/assets/${encodeURIComponent(id)}/meta`)] as const)),
+      ]);
       if (
         alive.current &&
         !busy.current &&
         sequence === sourceSequence.current
       ) {
         setSource(asset);
+        setInputs(Object.fromEntries(references));
         if (item.feature !== featureId) {
           setFeatureId(item.feature);
           setDoctor(undefined);
@@ -324,7 +379,15 @@ export default function App() {
         }
         if (item.feature === "remove-background")
           setBackgroundSettings(item.settings);
-        else setSettings(item.settings);
+        else if (item.feature === "relight") setSettings(item.settings);
+        else {
+          const restored = {...item.settings};
+          const currentFeature = features.find(candidate => candidate.id === item.feature);
+          if (currentFeature && !currentFeature.supported_modes.includes(restored.mode))
+            restored.mode = currentFeature.defaults.mode;
+          if ("negative_prompt" in restored) restored.negative_prompt = "";
+          setCreativeSettings(previous => ({...previous, [item.feature]: restored}));
+        }
         setSelected(item.id);
         setResolveFor(undefined);
         setView("result");
@@ -335,24 +398,6 @@ export default function App() {
       sourceMutation.current = false;
       if (alive.current) setLoadingSelection(false);
     }
-  };
-  const preset = presets.find((item) => item.direction === settings.direction);
-  const azimuth = settings.azimuth ?? preset?.azimuth ?? 0;
-  const elevation = settings.elevation ?? preset?.elevation ?? 0;
-  const custom = (az: number, el: number) =>
-    setSettings((previous) => ({
-      ...previous,
-      direction: "custom",
-      azimuth: Math.max(-180, Math.min(180, Math.round(az))),
-      elevation: Math.max(-90, Math.min(90, Math.round(el))),
-    }));
-  const point = (event: PointerEvent<HTMLDivElement>) => {
-    const box = event.currentTarget.getBoundingClientRect();
-    if (box.width)
-      custom(
-        ((event.clientX - box.left) / box.width) * 360 - 180,
-        90 - ((event.clientY - box.top) / box.height) * 180,
-      );
   };
   const cancel = async () => {
     if (!job || busy.current) return;
@@ -397,47 +442,37 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${hasSidePanel ? "app-workspace" : "creation-workspace"} ${feature?.output_kind === "video" ? "video-workspace" : ""}`}>
       <header className="topbar">
         <a className="brand" href="./" aria-label="MarcoStudio home">
-          <span className="brand-mark" aria-hidden="true">
-            M<span>✦</span>
-          </span>
+          <Aperture className="brand-mark" size={24} aria-hidden="true" />
           Marco<span className="brand-light">Studio</span>
         </a>
+        <ToolNavigation features={features} selected={featureId} disabled={sourceBusy || !!retry} select={switchTool} />
         <div className="header-actions">
           <a
             className="github-link"
+            aria-label="GitHub"
             href="https://github.com/NeoMarcoPolo/marcostudio"
             target="_blank"
             rel="noopener noreferrer"
           >
-            GitHub
+            <span>GitHub</span><ArrowUpRight size={16} aria-hidden="true" />
           </a>
           <button
             className="settings-button"
+            aria-label="Settings"
             disabled={!studio}
             onClick={() => setShowSettings(true)}
           >
-            Settings <span aria-hidden="true">⚙</span>
+            <Settings2 size={17} aria-hidden="true" /><span>Settings</span>
           </button>
         </div>
       </header>
       <main>
-        <nav className="tool-navigation" aria-label="Tools">
-          {features.map((item) => (
-            <button
-              key={item.id}
-              aria-pressed={item.id === featureId}
-              disabled={sourceBusy || !!retry}
-              onClick={() => switchTool(item.id)}
-            >
-              {item.name}
-            </button>
-          ))}
-        </nav>
         <div className="page-heading">
-          <div>
+          <div className="breadcrumb">
+            <span>{toolGroup(featureId)}</span><ChevronRight size={13} aria-hidden="true" />
             <h1>{feature?.name ?? "Relight"}</h1>
           </div>
           <div
@@ -481,7 +516,7 @@ export default function App() {
               </button>
             )}
             <button aria-label="Dismiss error" onClick={() => setError("")}>
-              ×
+              <X size={16} aria-hidden="true" />
             </button>
           </div>
         )}
@@ -492,8 +527,8 @@ export default function App() {
           </div>
         )}
         <div className="studio-grid">
-          <section className="workspace" aria-label="Image workspace">
-            <div className="canvas-toolbar">
+          <section className="workspace" aria-label={`${feature?.output_kind === "video" ? "Video" : "Image"} workspace`}>
+            <div className={`canvas-toolbar ${!source && !result ? "canvas-toolbar-empty" : ""}`}>
               <div className="canvas-tabs">
                 <button
                   aria-pressed={view === "result"}
@@ -502,7 +537,7 @@ export default function App() {
                   Preview
                 </button>
                 <button
-                  disabled={!result}
+                  disabled={!canCompare}
                   aria-pressed={view === "compare"}
                   onClick={() => setView("compare")}
                 >
@@ -510,123 +545,45 @@ export default function App() {
                 </button>
               </div>
               <span className="canvas-meta">
-                {source
-                  ? `${(result ?? source).width} × ${(result ?? source).height}`
+                {result || source
+                  ? `${(result ?? source)!.width} × ${(result ?? source)!.height}`
                   : null}
               </span>
             </div>
-            <div className={`image-canvas ${source ? "has-source" : ""}`}>
-              {!source ? (
-                <div className="empty-canvas">
-                  <div className="empty-art" aria-hidden="true">
-                    <span className="light-ray" />
-                    <span className="empty-orb" />
-                    <span className="orb-shadow" />
-                  </div>
-                  <h2>Upload an image</h2>
-                  <p>PNG or JPEG, up to 32 MiB.</p>
-                  <label className="upload-button">
-                    Upload image
-                    <input
-                      aria-label="Upload source image"
-                      type="file"
-                      accept="image/*"
-                      disabled={sourceBusy}
-                      onChange={(event) => void upload(event.target.files?.[0])}
-                    />
-                  </label>
-                </div>
-              ) : (
-                <>
-                  <div
-                    className="image-stage"
-                    style={{ aspectRatio: `${source.width}/${source.height}` }}
-                  >
-                    <img
-                      className="source-image"
-                      src={source.url}
-                      alt={`Source: ${source.filename}`}
-                      width={source.width}
-                      height={source.height}
-                      style={{
-                        visibility:
-                          result && view === "result" ? "hidden" : undefined,
-                      }}
-                    />
-                    {result && (
-                      <img
-                        className="result-image"
-                        src={result.url}
-                        alt={`Result: ${result.filename}`}
-                        width={result.width}
-                        height={result.height}
-                        style={
-                          view === "compare"
-                            ? { clipPath: `inset(0 0 0 ${comparison}%)` }
-                            : undefined
-                        }
-                      />
-                    )}
-                    {result && view === "compare" && (
-                      <>
-                        <div
-                          className="compare-line"
-                          style={{ left: `${comparison}%` }}
-                        >
-                          <span aria-hidden="true">↔</span>
-                        </div>
-                        <span className="image-badge before">Original</span>
-                        <span className="image-badge after">
-                          {isRelight ? "Relit" : "Cutout"}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                  {selectedActive && (
-                    <div className="job-overlay" role="status">
-                      <span className="spinner" />
-                      <strong>{activityLabel(job!.status)}</strong>
-                      {job!.progress !== null ? (
-                        <span>{Math.round(job!.progress * 100)}%</span>
-                      ) : job!.status === "queued" ? (
-                        <span>Waiting for ComfyUI</span>
-                      ) : null}
-                    </div>
-                  )}
-                </>
-              )}
-              {(uploading || loadingSelection) && (
-                <div className="job-overlay" role="status">
-                  <span className="spinner" />
-                  {loadingSelection
-                    ? "Loading generation…"
-                    : "Uploading image…"}
-                </div>
-              )}
-            </div>
-            {source && (
+            <MediaPreview feature={feature} source={source} result={result} transparent={isBackground}
+              view={canCompare ? view : "result"} comparison={comparison} resultLabel={resultLabel}
+              busy={sourceBusy || !!retry} uploading={uploading} loading={loadingSelection}
+              progress={job?.progress} activity={selectedActive ? activityLabel(job!.status) : undefined}
+              upload={file => void upload(file)} />
+            {(source || result) && (
               <div className="result-toolbar">
                 <div>
-                  <span className="file-name">{source.filename}</span>
-                  <label className="text-upload">
-                    Replace image
+                  <span className="file-name">{(source ?? result)!.filename}</span>
+                  {sourceKind !== "none" && feature?.output_kind !== "video" && <label className="text-upload">
+                    Replace {sourceKind}
                     <input
-                      aria-label="Upload source image"
+                      aria-label={`Upload source ${sourceKind}`}
                       type="file"
-                      accept="image/*"
-                      disabled={sourceBusy}
-                      onChange={(event) => void upload(event.target.files?.[0])}
+                      accept={sourceKind === "video" ? "video/mp4" : "image/png,image/jpeg"}
+                      disabled={sourceBusy || !!retry}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        void upload(file);
+                      }}
                     />
-                  </label>
+                  </label>}
                 </div>
                 <div className="result-actions">
                   {result && (
                     <>
                       <button
-                        disabled={sourceBusy}
+                        disabled={sourceBusy || !!retry}
                         onClick={() => {
                           if (busy.current || sourceMutation.current) return;
                           ++sourceSequence.current;
+                          if (result.media_type === "video/mp4") switchTool("restyle-video");
+                          else if (sourceKind !== "image") switchTool("edit-image");
                           setSource(result);
                           setSelected(undefined);
                           setRetry(undefined);
@@ -638,15 +595,16 @@ export default function App() {
                         className="download"
                         href={result.url}
                         download={result.filename}
+                        onClick={event => {if (isBrowserRuntime()) {event.preventDefault(); void downloadAsset(result).catch(error => setError(message(error)));}}}
                       >
-                        Download <span aria-hidden="true">↓</span>
+                        <ArrowDownToLine size={15} aria-hidden="true" /> Download
                       </a>
                     </>
                   )}
                 </div>
               </div>
             )}
-            {result && view === "compare" && (
+            {canCompare && view === "compare" && (
               <div className="comparison-control">
                 <label htmlFor="comparison">Original</label>
                 <input
@@ -658,7 +616,7 @@ export default function App() {
                   value={comparison}
                   onChange={(e) => setComparison(Number(e.target.value))}
                 />
-                <span>{isRelight ? "Relit" : "Cutout"}</span>
+                <span>{resultLabel}</span>
               </div>
             )}
             {job && (
@@ -731,242 +689,26 @@ export default function App() {
             )}
           </section>
           <aside
-            className="controls"
-            aria-label={isRelight ? "Light controls" : "Background removal"}
+            className={`controls ${hasSidePanel ? "app-controls" : "composer"}`}
+            aria-label={isRelight ? "Light controls" : isBackground ? "Background removal" : `${feature?.name} controls`}
           >
             {isRelight ? (
-              <>
-                <div className="panel-title">
-                  <h2>Light settings</h2>
-                  <span aria-hidden="true">✦</span>
-                </div>
-                <div className="control-section">
-                  <div className="control-heading">
-                    <h3>Direction</h3>
-                  </div>
-                  <div
-                    className="direction-pad"
-                    role="group"
-                    aria-label="Light direction"
-                  >
-                    <span className="axis-h" />
-                    <span className="axis-v" />
-                    <div className="direction-orb" />
-                    <div
-                      className="drag-surface"
-                      role="slider"
-                      tabIndex={0}
-                      aria-label="Drag light direction"
-                      aria-valuemin={-180}
-                      aria-valuemax={180}
-                      aria-valuenow={azimuth}
-                      aria-valuetext={`Azimuth ${azimuth} degrees, elevation ${elevation} degrees`}
-                      onPointerDown={(event) => {
-                        event.currentTarget.setPointerCapture?.(
-                          event.pointerId,
-                        );
-                        point(event);
-                      }}
-                      onPointerMove={(event) => {
-                        if (event.buttons === 1) point(event);
-                      }}
-                      onKeyDown={(event) => {
-                        if (
-                          [
-                            "ArrowLeft",
-                            "ArrowRight",
-                            "ArrowUp",
-                            "ArrowDown",
-                          ].includes(event.key)
-                        ) {
-                          event.preventDefault();
-                          custom(
-                            azimuth +
-                              (event.key === "ArrowRight"
-                                ? 10
-                                : event.key === "ArrowLeft"
-                                  ? -10
-                                  : 0),
-                            elevation +
-                              (event.key === "ArrowUp"
-                                ? 10
-                                : event.key === "ArrowDown"
-                                  ? -10
-                                  : 0),
-                          );
-                        }
-                      }}
-                    >
-                      <span
-                        className="light-handle"
-                        style={{
-                          left: `${((azimuth + 180) / 360) * 100}%`,
-                          top: `${((90 - elevation) / 180) * 100}%`,
-                        }}
-                      />
-                    </div>
-                    <span className="pad-caption">DRAG TO POSITION LIGHT</span>
-                  </div>
-                  <div className="direction-presets">
-                    {presets.map((item) => (
-                      <button
-                        key={item.direction}
-                        aria-pressed={settings.direction === item.direction}
-                        onClick={() =>
-                          setSettings((previous) => {
-                            const {
-                              azimuth: _a,
-                              elevation: _e,
-                              ...rest
-                            } = previous;
-                            return { ...rest, direction: item.direction };
-                          })
-                        }
-                      >
-                        <span aria-hidden="true">{item.symbol}</span>
-                        {item.name}
-                      </button>
-                    ))}
-                  </div>
-                  <details className="angle-details">
-                    <summary>
-                      Custom direction{" "}
-                      <span>
-                        {azimuth}° / {elevation}°
-                      </span>
-                    </summary>
-                    <label>
-                      Azimuth
-                      <input
-                        aria-label="Azimuth"
-                        type="range"
-                        min="-180"
-                        max="180"
-                        step="1"
-                        value={azimuth}
-                        onChange={(e) =>
-                          custom(Number(e.target.value), elevation)
-                        }
-                      />
-                    </label>
-                    <label>
-                      Elevation
-                      <input
-                        aria-label="Elevation"
-                        type="range"
-                        min="-90"
-                        max="90"
-                        step="1"
-                        value={elevation}
-                        onChange={(e) =>
-                          custom(azimuth, Number(e.target.value))
-                        }
-                      />
-                    </label>
-                  </details>
-                </div>
-                <div className="control-section">
-                  <h3>Softness</h3>
-                  <div className="segmented">
-                    {(["soft", "hard"] as const).map((value) => (
-                      <button
-                        key={value}
-                        aria-pressed={settings.softness === value}
-                        onClick={() =>
-                          setSettings((previous) => ({
-                            ...previous,
-                            softness: value,
-                          }))
-                        }
-                      >
-                        <span aria-hidden="true">
-                          {value === "soft" ? "◌" : "◍"}
-                        </span>
-                        {value === "soft" ? "Soft" : "Hard"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="control-section">
-                  <label className="control-heading" htmlFor="brightness">
-                    <strong>Brightness</strong>
-                    <span className="brightness-value">
-                      {settings.brightness}%
-                    </span>
-                  </label>
-                  <input
-                    id="brightness"
-                    aria-label="Brightness"
-                    type="range"
-                    min="10"
-                    max="100"
-                    step="10"
-                    value={settings.brightness}
-                    onChange={(e) =>
-                      setSettings((previous) => ({
-                        ...previous,
-                        brightness: Number(e.target.value),
-                      }))
-                    }
-                  />
-                  <div className="range-labels">
-                    <span>Subtle</span>
-                    <span>Vivid</span>
-                  </div>
-                </div>
-                <div className="control-section color-row">
-                  <label htmlFor="light-color">
-                    <strong>Light color</strong>
-                  </label>
-                  <div className="color-input">
-                    <input
-                      id="light-color"
-                      aria-label="Light color"
-                      type="color"
-                      value={settings.color}
-                      onChange={(e) =>
-                        setSettings((previous) => ({
-                          ...previous,
-                          color: e.target.value,
-                        }))
-                      }
-                    />
-                    <span>{settings.color.toUpperCase()}</span>
-                  </div>
-                </div>
-                <div className="control-section seed-row">
-                  <label htmlFor="seed">
-                    <strong>Seed</strong>
-                  </label>
-                  <input
-                    id="seed"
-                    aria-label="Seed"
-                    type="number"
-                    min="0"
-                    max={Number.MAX_SAFE_INTEGER}
-                    step="1"
-                    value={Number.isNaN(settings.seed) ? "" : settings.seed}
-                    onChange={(e) =>
-                      setSettings((previous) => ({
-                        ...previous,
-                        seed:
-                          e.target.value === "" ? NaN : Number(e.target.value),
-                      }))
-                    }
-                  />
-                </div>
-                {!validSeed && (
-                  <p className="field-error">
-                    Use a nonnegative whole number up to{" "}
-                    {Number.MAX_SAFE_INTEGER}.
-                  </p>
-                )}
-              </>
-            ) : (
-              <div className="panel-title">
-                <h2>Transparent PNG</h2>
-              </div>
-            )}
+              <RelightControls settings={settings} setSettings={setSettings} validSeed={validSeed} />
+            ) : isBackground ? (
+              <><div className="panel-title"><ToolIcon size={20} aria-hidden="true" /><h2>Remove Background</h2></div>
+                <div className="output-format"><span>Output</span><strong>Transparent PNG</strong></div></>
+            ) : feature && creative ? <>
+              {feature.output_kind === "video" && <>
+                <div className="panel-title"><ToolIcon size={20} aria-hidden="true" /><h2>{feature.name}</h2></div>
+                {sourceKind !== "none" && <SourceInput feature={feature} source={source}
+                  disabled={sourceBusy || !!retry} upload={file => void upload(file)} />}
+              </>}
+              <InputAssets feature={feature} inputs={inputs} settings={creative}
+                disabled={sourceBusy || !!retry} upload={(file, key) => void upload(file, key)}
+                remove={removeInput} change={changeCreative} />
+              <div className="creative-settings"><ToolControls feature={feature} value={creative} change={changeCreative} masked={!!inputs.mask} /></div>
+            </> : null}
+            {!validGuides && <p className="field-error">Guide times must increase and stay within the video duration.</p>}
             <div className="generate-area">
               <div className="generate-row">
                 <button
@@ -974,22 +716,24 @@ export default function App() {
                   disabled={!enabled}
                   onClick={generate}
                 >
-                  <span aria-hidden="true">✦</span>
+                  <Sparkles size={17} aria-hidden="true" />
                   {posting
                     ? "Submitting…"
                     : selectedActive
                       ? activityLabel(job!.status)
-                      : isRelight
-                        ? "Generate"
-                        : "Remove background"}
+                      : isBackground ? "Remove background" : "Generate"}
                 </button>
-                {isRelight && (
+                {feature?.supported_modes.includes("flash") && (
                   <div className="flash-control">
                     <button
                       role="switch"
                       aria-label="Flash"
-                      aria-checked={settings.mode === "flash"}
-                      disabled={!feature?.supported_modes.includes("standard")}
+                      aria-checked={toolSettings.mode === "flash"}
+                      disabled={!feature.supported_modes.includes("standard") || sourceBusy || !!retry}
+                      onClick={() => {
+                        const mode = toolSettings.mode === "flash" ? "standard" : "flash";
+                        if (!isRelight) changeCreative({mode});
+                      }}
                     >
                       <span className="switch-track">
                         <span />
@@ -1004,6 +748,7 @@ export default function App() {
                   className="regenerate-button"
                   disabled={
                     !doctor?.ready ||
+                    !feature?.supported_modes.includes(job.settings.mode) ||
                     checking ||
                     sourceBusy ||
                     selectedActive ||
@@ -1022,19 +767,20 @@ export default function App() {
               )}
             </div>
           </aside>
-        </div>
         <section className="history-section" aria-label="Generation history">
           <div className="history-heading">
-            <div>
-              <h2>
-                Recent generations{" "}
-                <span>{jobs.length.toString().padStart(2, "0")}</span>
-              </h2>
-            </div>
+            <History size={18} aria-hidden="true" /><h2 className="sr-only">Recent generations</h2>
+            <span className="history-count">{jobs.length}</span>
           </div>
+          <button className="new-generation" aria-label="New generation" title="New generation"
+            disabled={sourceBusy || !!retry} onClick={() => {
+              if (busy.current || sourceMutation.current) return;
+              ++sourceSequence.current;
+              setSelected(undefined); setSource(undefined); setInputs({}); setResolveFor(undefined);
+            }}><Plus size={20} aria-hidden="true" /></button>
           {jobs.length === 0 ? (
             <div className="empty-history">
-              <span aria-hidden="true">◷</span>No generations yet.
+              No generations yet.
             </div>
           ) : (
             <div className="history-list">
@@ -1044,46 +790,33 @@ export default function App() {
                   key={item.id}
                   aria-label={`Open generation ${new Date(item.created_at).toLocaleString()} ${label(item.status)}`}
                   aria-pressed={selected === item.id}
+                  data-status={item.status}
+                  title={`${features.find(tool => tool.id === item.feature)?.name ?? item.feature} · ${label(item.status)} · ${new Date(item.created_at).toLocaleString()}`}
                   disabled={sourceBusy || !!retry}
                   onClick={() => void openJob(item)}
                 >
-                  {item.outputs[0] ? (
+                  {item.outputs[0]?.media_type !== "video/mp4" && item.outputs[0] ? (
                     <img src={item.outputs[0].url} alt="" loading="lazy" />
                   ) : (
                     <span className="history-placeholder" aria-hidden="true">
-                      ✦
+                      {features.find(tool => tool.id === item.feature)?.output_kind === "video" ? <Video size={20} /> : <Sparkles size={20} />}
                     </span>
                   )}
-                  <div>
-                    <strong>
-                      {item.feature === "remove-background"
-                        ? "Remove Background"
-                        : item.settings.direction.charAt(0).toUpperCase() +
-                          item.settings.direction.slice(1) +
-                          " light"}
-                    </strong>
-                    {item.feature === "relight" && (
-                      <span>
-                        {item.settings.softness} · {item.settings.brightness}%
-                      </span>
-                    )}
-                    <span className={`job-status ${item.status}`}>
-                      {label(item.status)}
-                    </span>
-                  </div>
-                  <time dateTime={item.created_at}>
-                    {new Date(item.created_at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
                 </button>
               ))}
             </div>
           )}
         </section>
+        </div>
       </main>
-      {showSettings && (
+      {showSettings && isBrowserRuntime() && <Onboarding feature={feature} featureId={featureId} mode={toolSettings.mode}
+        doctor={doctor} checking={checking} locked={!!activeJob || posting || !!retry} refresh={refreshDoctor}
+        connected={async () => {
+          const value = await api<StudioSettings>("/api/settings");
+          if (studio?.comfy_url && studio.comfy_url !== value.comfy_url) {setSource(undefined); setInputs({}); setSelected(undefined);}
+          setStudio(value); setJobs(await api<Job[]>("/api/jobs")); await refreshDoctor();
+        }} close={closeSettings} />}
+      {showSettings && !isBrowserRuntime() && (
         <SettingsDialog
           value={studio}
           doctor={doctor}

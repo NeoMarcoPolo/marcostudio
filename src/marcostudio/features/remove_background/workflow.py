@@ -3,7 +3,12 @@ from .settings import RemoveBackgroundSettings
 
 
 def compile_workflow(
-    settings: RemoveBackgroundSettings, source: str, prefix: str, models: dict[str, str]
+    settings: RemoveBackgroundSettings,
+    source: str,
+    prefix: str,
+    models: dict[str, str],
+    *,
+    inputs=None,
 ) -> dict:
     """Official base edit path, with a bounded reference size and direct RGBA PNG output."""
     names = {m.key: models.get(m.key, m.filename) for m in MODELS}
@@ -13,6 +18,7 @@ def compile_workflow(
 
     return {
         "11": node("LoadImage", image=source),
+        "13": node("JoinImageWithAlpha", image=["11", 0], alpha=["11", 1]),
         "37": node("UNETLoader", unet_name=names["qwen21_diffusion"], weight_dtype="default"),
         "38": node(
             "CLIPLoader", clip_name=names["qwen21_encoder"], type="qwen_image", device="default"
@@ -26,7 +32,7 @@ def compile_workflow(
             prompt=settings.prompt(),
             negative_prompt="",
             resolution=1024,
-            **{"images.image_1": ["11", 0]},
+            **{"images.image_1": ["13", 0]},
         ),
         "3": node(
             "KSampler",

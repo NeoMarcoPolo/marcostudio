@@ -81,18 +81,27 @@ class Store:
         return [json.loads(row[0]) for row in rows]
 
     def create_job(
-        self, source_id: str, settings: dict, request_id: str, *, feature: str = "relight"
+        self,
+        source_id: str | None,
+        settings: dict,
+        request_id: str,
+        *,
+        feature: str = "relight",
+        inputs: dict[str, str] | None = None,
     ) -> dict:
-        self.asset(source_id)
+        inputs = inputs or {}
+        if source_id is not None:
+            self.asset(source_id)
+        for asset_id in inputs.values():
+            self.asset(asset_id)
         if (
             not 1 <= len(request_id) <= 128
             or not request_id.isascii()
             or not request_id.isprintable()
         ):
             raise ValueError("request_id must be 1–128 printable ASCII characters")
-        fingerprint = hashlib.sha256(
-            json.dumps([source_id, settings], sort_keys=True).encode()
-        ).hexdigest()
+        identity = [source_id, settings, inputs] if inputs else [source_id, settings]
+        fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         stamp, job_id = now(), str(uuid.uuid4())
         body = {
             "id": job_id,
@@ -100,6 +109,7 @@ class Store:
             "request_id": request_id,
             "settings": settings,
             "source_id": source_id,
+            "inputs": inputs,
             "status": "preparing",
             "outputs": [],
             "error": None,

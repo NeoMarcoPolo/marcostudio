@@ -104,6 +104,41 @@ def test_runtime_lock_prevents_second_worker_and_releases(tmp_path):
         pass
 
 
+def test_settings_can_restore_recorded_endpoints_without_retargeting_jobs(client):
+    source = upload(client)
+    job = client.post(
+        "/api/jobs", json={"source_id": source["id"], "settings": {}, "request_id": "restore"}
+    ).json()
+    original = {"comfy_url": "http://127.0.0.1:8288", "proxy_url": "http://127.0.0.1:8289"}
+    store = client.app.state.store
+    store.update_job(job["id"], status="needs_attention", backend=original)
+    settings = client.get("/api/settings").json()
+    assert settings["restore_connection"] == original
+    assert client.put("/api/settings", json={"comfy_url": original["comfy_url"]}).status_code == 409
+    assert (
+        client.put("/api/settings", json=original | {"comfy_dir": "elsewhere"}).status_code == 409
+    )
+    # Conflicting unfinished jobs must not permit either target.
+    other = store.create_job(source["id"], {}, "other")
+    store.update_job(
+        other["id"],
+        status="needs_attention",
+        backend={"comfy_url": "http://127.0.0.1:8388", "proxy_url": "http://127.0.0.1:8389"},
+    )
+    assert client.get("/api/settings").json()["restore_connection"] is None
+    assert client.put("/api/settings", json=original).status_code == 409
+    store.update_job(other["id"], status="abandoned")
+    restored = client.put("/api/settings", json=original)
+    assert restored.status_code == 200
+    assert restored.json()["comfy_url"] == original["comfy_url"]
+    assert restored.json()["proxy_url"] == original["proxy_url"]
+    assert restored.json()["restore_connection"] is None
+    assert store.job(job["id"])["status"] == "needs_attention"
+    assert (
+        client.put("/api/settings", json={"comfy_url": "http://127.0.0.1:8488"}).status_code == 409
+    )
+
+
 def test_resolution_requires_confirmation_and_retains_uncertainty_in_history(client):
     class MissingRun:
         async def find(self, prefix):

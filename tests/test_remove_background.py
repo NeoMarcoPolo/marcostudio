@@ -110,6 +110,10 @@ async def test_background_worker_records_qwen_graph_and_retains_output_alpha(tmp
     assert encode["inputs"]["prompt"] == "Remove the background, and output a PNG image"
     assert encode["inputs"]["resolution"] == 1024
     assert "images.image_1" in encode["inputs"]
+    rgba = graph[encode["inputs"]["images.image_1"][0]]
+    assert rgba["class_type"] == "JoinImageWithAlpha"
+    assert rgba["inputs"]["image"] == ["11", 0]
+    assert rgba["inputs"]["alpha"] == ["11", 1]
     assert not any("Lora" in n["class_type"] for n in graph.values())
     assert submitted["receipt"]["feature"] == "remove-background"
     await service.reconcile(job["id"])

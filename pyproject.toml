@@ -37,7 +37,7 @@ Releases = "https://github.com/NeoMarcoPolo/marcostudio/releases"
 packages = ["src/marcostudio"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/", "tests/", "frontend/src/", "frontend/package*.json", "frontend/*.ts", "frontend/tsconfig.json", "frontend/index.html", "pyproject.toml", "uv.lock", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"]
+include = ["src/", "tests/", "frontend/src/", "frontend/public/", "frontend/package*.json", "frontend/*.ts", "frontend/tsconfig.json", "frontend/index.html", "pyproject.toml", "uv.lock", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

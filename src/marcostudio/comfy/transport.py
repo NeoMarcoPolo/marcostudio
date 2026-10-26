@@ -8,8 +8,7 @@ from comfy_low.transport import AsyncComfyLow
 from comfy_sdk.assets import AsyncAssetFactory
 
 from ..config import Settings
-
-MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+from ..core.video import MAX_OUTPUT_BYTES
 
 
 class ComfyTransport:
@@ -36,8 +35,8 @@ class ComfyTransport:
         if self.owned:
             await self.http.aclose()
 
-    async def upload(self, data: bytes, filename: str) -> dict:
-        asset = self.assets.from_bytes(data, filename=filename, content_type="image/png")
+    async def upload(self, data: bytes, filename: str, content_type="image/png") -> dict:
+        asset = self.assets.from_bytes(data, filename=filename, content_type=content_type)
         await asset.commit()
         return await asset.as_reference()
 
@@ -90,7 +89,7 @@ class ComfyTransport:
             async for chunk in response.aiter_bytes():
                 content.extend(chunk)
                 if len(content) > MAX_OUTPUT_BYTES:
-                    raise ValueError("Output exceeds the supported image size")
+                    raise ValueError("Output exceeds the supported media size")
         return bytes(content)
 
     async def cancel(self, job_id: str) -> bool:
@@ -116,7 +115,7 @@ class ComfyTransport:
                 continue
             node = entry[2].get("12", {})
             if (
-                node.get("class_type") == "SaveImage"
+                node.get("class_type") in {"SaveImage", "SaveVideo"}
                 and node.get("inputs", {}).get("filename_prefix") == output_prefix
             ):
                 matches.add(str(UUID(entry[1])))

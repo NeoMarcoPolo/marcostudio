@@ -19,6 +19,13 @@ const checkLabels: Record<string, string> = {
   "model:qwen21_diffusion": "Qwen 2.1 image model",
   "model:qwen21_encoder": "Qwen 2.1 text encoder",
   "model:qwen21_vae": "Qwen 2.1 image decoder",
+  "model:h3_diffusion": "H3 video model",
+  "model:h3_encoder": "H3 text encoder",
+  "model:h3_vae": "H3 video decoder",
+  "model:h3_audio_vae": "H3 audio decoder",
+  "model:h3_control": "H3 motion control model",
+  ffmpeg: "FFmpeg",
+  ffprobe: "FFprobe",
 };
 
 function CheckList({ checks }: { checks: Doctor["checks"] }) {
@@ -82,6 +89,8 @@ export function SettingsDialog({
   };
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const element = dialog.current;
     element?.querySelector<HTMLElement>("button")?.focus();
     const handler = (event: KeyboardEvent) => {
@@ -106,16 +115,11 @@ export function SettingsDialog({
     document.addEventListener("keydown", handler);
     return () => {
       document.removeEventListener("keydown", handler);
+      document.body.style.overflow = previousOverflow;
       previous?.focus();
     };
   }, [close]);
-  const update = async () => {
-    if (saving || checking || locked || !value || !dirty) return;
-    if (!form.comfy_url.trim() || !form.comfy_dir.trim() || !form.proxy_url.trim()) {
-      setAdvanced(true);
-      setError("Enter the ComfyUI URL, ComfyUI folder, and API proxy URL.");
-      return;
-    }
+  const persist = async (changes: Partial<StudioSettings>) => {
     setSaving(true);
     setError("");
     setSaved(false);
@@ -133,6 +137,15 @@ export function SettingsDialog({
     } finally {
       setSaving(false);
     }
+  };
+  const update = async () => {
+    if (saving || checking || locked || !value || !dirty) return;
+    if (!form.comfy_url.trim() || !form.comfy_dir.trim() || !form.proxy_url.trim()) {
+      setAdvanced(true);
+      setError("Enter the ComfyUI URL, ComfyUI folder, and API proxy URL.");
+      return;
+    }
+    await persist(changes);
   };
   return (
     <div className="dialog-backdrop">
@@ -171,14 +184,29 @@ export function SettingsDialog({
           ) : !checking && failures.length > 0 ? (
             <CheckList checks={failures} />
           ) : !checking && !doctor ? (
-            <p>Use Check setup to test the connection and Relight model files.</p>
+            <p>Check the connection and this tool's model files.</p>
           ) : null}
+          {!checking && doctor?.model_requirements?.some(model => !model.available) && <ul className="model-downloads">
+            {doctor.model_requirements.filter(model => !model.available).map(model => <li key={model.filename}>
+              <a href={model.url} target="_blank" rel="noopener noreferrer">{model.filename}</a>
+              <span>{(model.size / 1e9).toFixed(1)} GB · models/{model.category}</span>
+            </li>)}
+          </ul>}
         </section>
         {locked && (
           <p className="settings-notice">
-            Finish or resolve active generations before editing the connection.
+            {value?.restore_connection
+              ? "Restore the connection used by unfinished generations."
+              : "Finish or resolve active generations before editing the connection."}
           </p>
         )}
+        {value?.restore_connection && <div className="settings-notice">
+          <p>ComfyUI: {value.restore_connection.comfy_url}<br />Proxy: {value.restore_connection.proxy_url}</p>
+          <button type="button" disabled={saving || checking} onClick={() => {
+            if (!saving && !checking && value.restore_connection)
+              void persist(value.restore_connection);
+          }}>Restore original connection</button>
+        </div>}
         {error && (
           <p role="alert" className="field-error">
             {error}

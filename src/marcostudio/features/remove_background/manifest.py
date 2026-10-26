@@ -1,6 +1,6 @@
 from ..models import Model
 
-WORKFLOW_VERSION = "qwen21-remove-background-v1"
+WORKFLOW_VERSION = "qwen21-remove-background-v2"
 SOURCE_REVISION = "e7cd011d4ded3411c2f481200544f0be6fdc962e"
 SOURCE_SHA256 = "2fca0a2581fd428f4a2007d8d4acede4a31dcb79976b177ec5243b8208e19de0"
 SOURCE_URL = f"https://github.com/Comfy-Org/workflow_templates/blob/{SOURCE_REVISION}/templates/image_qwen_image_2_1_background_removal.json"

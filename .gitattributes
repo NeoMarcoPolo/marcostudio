@@ -1,3 +1,7 @@
 # Keep Vite's HTML input and bundled assets reproducible across platforms.
 /frontend/index.html text eol=lf
 /src/marcostudio/web/** text eol=lf
+
+# Preserve bundled fonts and node archives byte-for-byte.
+*.woff2 binary
+*.zip binary

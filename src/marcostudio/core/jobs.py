@@ -30,18 +30,43 @@ class JobService:
             try:
                 feature = get_feature(job["feature"])
                 settings = feature.parse_settings(job["settings"])
+                source = (
+                    await asyncio.to_thread(self.assets.metadata, job["source_id"])
+                    if job["source_id"]
+                    else None
+                )
+                feature.validate_assets(
+                    source,
+                    {key: self.store.asset(value) for key, value in job.get("inputs", {}).items()},
+                    settings,
+                )
                 report = readiness or await diagnose(self.config, settings.mode, feature=feature.id)
                 if not report["ready"]:
                     failures = [c["message"] for c in report["checks"] if c["status"] == "fail"]
                     raise ValueError("Setup needs attention: " + "; ".join(failures))
-                content = await asyncio.to_thread(self.assets.path(job["source_id"]).read_bytes)
-                reference = await self.transport.upload(content, f"{job['source_id']}.png")
-                graph = feature.compile(settings, reference, job["output_prefix"], report["models"])
+
+                async def upload_asset(asset_id):
+                    asset = self.store.asset(asset_id)
+                    path = self.assets.path(asset_id)
+                    content = await asyncio.to_thread(path.read_bytes)
+                    return await self.transport.upload(content, path.name, asset["media_type"])
+
+                reference = await upload_asset(job["source_id"]) if job["source_id"] else None
+                inputs = {}
+                for key, asset_id in job.get("inputs", {}).items():
+                    inputs[key] = await upload_asset(asset_id)
+                graph = feature.compile(
+                    settings, reference, job["output_prefix"], report["models"], inputs=inputs
+                )
                 receipt = {
                     "feature": feature.id,
                     "workflow_version": feature.manifest.WORKFLOW_VERSION,
                     "source_revision": feature.manifest.SOURCE_REVISION,
                     "source_workflow_sha256": feature.manifest.SOURCE_SHA256,
+                    "source_url": getattr(feature.manifest, "SOURCE_URL", None),
+                    "variant_source": getattr(feature.manifest, "VARIANT_SOURCES", {}).get(
+                        settings.mode
+                    ),
                     "settings": settings.model_dump(),
                     "requested_mode": settings.mode,
                     "effective_mode": settings.mode,
@@ -55,9 +80,10 @@ class JobService:
                             "expected_sha256": m.sha256,
                             **report.get("identities", {}).get(m.key, {}),
                         }
-                        for m in feature.manifest.MODELS
+                        for m in feature.models_for(settings.mode)
                     },
                     "source_id": job["source_id"],
+                    "inputs": job.get("inputs", {}),
                     "created_at": job["created_at"],
                     "runtime": report.get("runtime", {}),
                 }
@@ -117,15 +143,21 @@ class JobService:
             if status == "succeeded":
                 outputs = [o for o in state["outputs"] if o.get("node_id") == "12"]
                 if not outputs:
-                    raise ValueError("Completed execution has no expected image output")
+                    raise ValueError("Completed execution has no expected media output")
                 assets = []
+                feature = get_feature(job["feature"])
+                extension = ".mp4" if feature.output_kind == "video" else ".png"
                 for output in outputs:
                     data = await self.transport.output(output, job["upstream_id"])
-                    assets.append(
-                        await asyncio.to_thread(
-                            self.assets.add, data, f"{job['feature']}-{job_id[:8]}.png", output=True
-                        )
+                    asset = await asyncio.to_thread(
+                        self.assets.add,
+                        data,
+                        f"{job['feature']}-{job_id[:8]}{extension}",
+                        output=True,
                     )
+                    if not asset["media_type"].startswith(feature.output_kind + "/"):
+                        raise ValueError("Completed execution returned an unexpected media type")
+                    assets.append(asset)
                 stamp = now()
                 elapsed = (
                     datetime.fromisoformat(stamp)

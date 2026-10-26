@@ -16,6 +16,7 @@ CATEGORIES = {
     "text_encoders": ["text_encoders", "clip"],
     "vae": ["vae"],
     "loras": ["loras"],
+    "model_patches": ["model_patches"],
 }
 
 

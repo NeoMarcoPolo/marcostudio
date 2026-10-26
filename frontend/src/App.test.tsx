@@ -8,6 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import App from "./App";
+import type { StudioSettings } from "./api";
 
 const defaults = {
   direction: "front",
@@ -46,6 +47,7 @@ const job = {
   queue_seconds: 1,
 };
 let history: unknown[] = [];
+let extraFeatures: unknown[] = [];
 let ready = true;
 let postError: string | null = null;
 let delayedPost = false;
@@ -54,7 +56,7 @@ let polledJob = job;
 let metadataWait: Promise<void> | undefined;
 let submissionWait: Promise<void> | undefined;
 let settingsWait: Promise<void> | undefined;
-let studioSettings = {
+let studioSettings: StudioSettings = {
   comfy_url: "http://localhost:8188",
   proxy_url: "http://localhost:8189",
   comfy_dir: "C:\\AI\\ComfyUI",
@@ -75,9 +77,11 @@ const deferred = () => {
   });
   return { promise, release };
 };
+const creativeDefaults = {mode: "standard", seed: 0, instruction: "", width: 1024, height: 1024, resolution: 1024};
 let calls: { url: string; method: string; body: any }[] = [];
 beforeEach(() => {
   history = [];
+  extraFeatures = [];
   ready = true;
   postError = null;
   delayedPost = false;
@@ -122,12 +126,14 @@ beforeEach(() => {
             supported_modes: ["standard"],
             defaults: { mode: "standard", seed: 0 },
           },
+          ...extraFeatures,
         ];
       else if (url === "/api/settings") {
         if (method === "PUT")
           studioSettings = {
             ...studioSettings,
             ...JSON.parse(String(init?.body)),
+            restore_connection: null,
           };
         data = studioSettings;
       } else if (url.startsWith("/api/doctor"))
@@ -177,6 +183,73 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+describe("image and video tools", () => {
+  it("submits text generation without uploading a fake image", async () => {
+    extraFeatures = [{id: "create-image", name: "Create Image", supported_modes: ["standard", "flash"],
+      defaults: creativeDefaults, source_kind: "none", output_kind: "image", input_slots: []}];
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("button", {name: "Image"})).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", {name: "Image"}));
+    await userEvent.click(await screen.findByRole("button", {name: "Create Image"}));
+    await userEvent.type(screen.getByLabelText("Prompt"), "A ceramic bowl on a table");
+    await waitFor(() => expect(screen.getByRole("button", {name: "Generate"})).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", {name: "Generate"}));
+    const sent = calls.find(c => c.url === "/api/jobs" && c.method === "POST")!;
+    expect(JSON.parse(sent.body)).toMatchObject({feature: "create-image", source_id: null,
+      settings: {instruction: "A ceramic bowl on a table"}});
+    expect(calls.some(c => c.url === "/api/assets" && c.method === "POST")).toBe(false);
+  });
+  it("requires and submits the named outfit input", async () => {
+    extraFeatures = [{id: "ai-stylist", name: "AI Stylist", supported_modes: ["standard", "flash"],
+      defaults: creativeDefaults, source_kind: "image", source_label: "Person", output_kind: "image",
+      input_slots: [{key: "reference_1", label: "Outfit", kind: "image", required: true}]}];
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("button", {name: "Apps"})).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", {name: "Apps"}));
+    await userEvent.click(await screen.findByRole("button", {name: "AI Stylist"}));
+    await upload();
+    expect(screen.getByRole("button", {name: "Generate"})).toBeDisabled();
+    await userEvent.upload(screen.getByLabelText("Upload Outfit"), new File(["image"], "outfit.png", {type: "image/png"}));
+    await waitFor(() => expect(screen.getByRole("button", {name: "Generate"})).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", {name: "Generate"}));
+    expect(JSON.parse(calls.find(c => c.url === "/api/jobs" && c.method === "POST")!.body))
+      .toMatchObject({feature: "ai-stylist", inputs: {reference_1: source.id}});
+  });
+  it("restores a video-only result from durable history without a source lookup", async () => {
+    extraFeatures = [{id: "create-video", name: "Create Video", supported_modes: ["standard", "flash"],
+      defaults: {...creativeDefaults, duration: 5}, source_kind: "none", output_kind: "video", input_slots: []}];
+    history = [{...job, feature: "create-video", source_id: null, settings: {...creativeDefaults, instruction: "Moving waves", duration: 5},
+      outputs: [{...output, media_type: "video/mp4", filename: "waves.mp4"}]}];
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", {name: /Open generation/}));
+    const player = await screen.findByLabelText("Result: waves.mp4");
+    expect(player.tagName).toBe("VIDEO");
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Moving waves");
+    expect(screen.getByRole("link", {name: /Download/})).toHaveAttribute("download", "waves.mp4");
+    expect(calls.some(c => c.url.includes("null/meta"))).toBe(false);
+  });
+  it("opens retired Flash keyframes in Standard without changing the recorded job", async () => {
+    const settings = {...creativeDefaults, width: 768, height: 448, duration: 5,
+      instruction: "A continuous camera move", guide_frames: [48]};
+    extraFeatures = [{id: "keyframes", name: "Keyframes", supported_modes: ["standard"],
+      defaults: settings, source_kind: "image", output_kind: "video",
+      input_slots: [{key: "guide_1", label: "Guide 1", kind: "image", required: true}]}];
+    const recorded = {...job, feature: "keyframes", settings: {...settings, mode: "flash"},
+      inputs: {guide_1: source.id}, outputs: []};
+    history = [recorded];
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", {name: /Open generation/}));
+    await waitFor(() => expect(screen.getByRole("button", {name: "Generate"})).toBeEnabled());
+    expect(screen.queryByRole("switch", {name: "Flash"})).not.toBeInTheDocument();
+    expect(screen.getByRole("button", {name: "Regenerate recorded job"})).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", {name: "Generate"}));
+    expect(JSON.parse(calls.find(c => c.url === "/api/jobs" && c.method === "POST")!.body))
+      .toMatchObject({feature: "keyframes", inputs: {guide_1: source.id},
+        settings: {mode: "standard", guide_frames: [48], instruction: settings.instruction}});
+    expect(recorded.settings.mode).toBe("flash");
+  });
 });
 async function upload() {
   await waitFor(() =>
@@ -234,6 +307,7 @@ describe("Relight studio", () => {
       source_id: output.id,
       settings: { mode: "standard", seed: 7 },
     });
+    await userEvent.click(screen.getByRole("button", { name: "Apps" }));
     await userEvent.click(screen.getByRole("button", { name: "Relight" }));
     expect(screen.getByLabelText("Brightness")).toBeInTheDocument();
   });
@@ -402,6 +476,23 @@ describe("Relight studio", () => {
     expect(JSON.parse(calls.find((x) => x.method === "PUT")!.body)).toEqual({
       proxy_url: "http://localhost:8190",
     });
+  });
+  it("restores the recorded connection while keeping active-job settings locked", async () => {
+    history = [{...job, status: "needs_attention", outputs: []}];
+    polledJob = {...job, status: "needs_attention", outputs: []};
+    const original = {comfy_url: "http://localhost:8288", proxy_url: "http://localhost:8289"};
+    studioSettings.restore_connection = original;
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole("button", {name: "Settings"})).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", {name: "Settings"}));
+    expect(screen.getByLabelText("ComfyUI URL")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", {name: "Restore original connection"}));
+    await waitFor(() => expect(screen.getByLabelText("ComfyUI URL")).toHaveValue(original.comfy_url));
+    const sent = calls.find(item => item.url === "/api/settings" && item.method === "PUT")!;
+    expect(JSON.parse(sent.body)).toEqual(original);
+    expect(screen.getByLabelText("ComfyUI URL")).toBeDisabled();
+    expect(screen.queryByRole("button", {name: "Restore original connection"})).not.toBeInTheDocument();
+    expect(calls.some(item => item.method === "POST")).toBe(false);
   });
   it("locks connection edits during an active job while allowing setup checks", async () => {
     history = [{ ...job, status: "running", outputs: [] }];
