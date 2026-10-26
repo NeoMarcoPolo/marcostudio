@@ -6,7 +6,17 @@
 
 An open-source interface for your local ComfyUI. MarcoStudio provides the controls and workflows; your running ComfyUI generates the images and videos.
 
-You need a working ComfyUI installation on the computer you're using. No MarcoStudio account or credits. The [application and workflow source](https://github.com/NeoMarcoPolo/marcostudio) are public; workflow definitions live in [src/marcostudio/features](src/marcostudio/features).
+**Install and start ComfyUI on your computer before starting MarcoStudio.** Keep it running while you use the studio.
+
+No MarcoStudio account or credits. The [application and workflow source](https://github.com/NeoMarcoPolo/marcostudio) are public; workflow definitions live in [src/marcostudio/features](src/marcostudio/features).
+
+## Start ComfyUI first
+
+1. **Install ComfyUI.** Get [ComfyUI Desktop](https://comfy.org/download), or follow the official [portable/manual installation guide](https://docs.comfy.org/installation/system_requirements). Skip this if you already have it installed.
+2. **Start ComfyUI.** Open the app or run your installation's launcher. Wait for startup to finish.
+3. **Check it opens.** Open the local address shown by ComfyUI in your browser and confirm its editor loads. Keep that address for MarcoStudio's connection settings.
+
+Leave ComfyUI running, then [run MarcoStudio locally](#run-the-current-alpha-windows) or [start the browser frontend](#development). MarcoStudio checks the models and nodes needed for the tool you choose.
 
 ## Use your ComfyUI
 
@@ -63,23 +73,23 @@ Video tools are Powered by MiniMax H3. H3 and Character Swap weights have separa
 
 ## Run the current alpha (Windows)
 
-These instructions run the optional Python application, with its local file storage and CLI. To run just the website locally, see [Development](#development).
+Complete [Start ComfyUI first](#start-comfyui-first) above. These instructions run the optional Python application, with its local file storage and CLI. To run just the website locally, see [Development](#development).
 
 You need:
 
 - Git and Python 3.12+.
-- A working [ComfyUI installation](https://docs.comfy.org/installation/system_requirements), running in its own environment.
+- Your local ComfyUI running in its own environment.
 - For video tools, FFmpeg and FFprobe available on `PATH`.
 - Space for the selected tool's models, dependencies and outputs. GPU memory requirements depend on your ComfyUI setup; a minimum has not been established.
 
-In PowerShell, clone the repo and configure the path to your ComfyUI folder:
+In PowerShell, clone the repo and configure your ComfyUI folder and address. Replace `C:\AI\ComfyUI` with the folder containing ComfyUI's `main.py`, and use the local address you checked above:
 
 ```powershell
 git clone https://github.com/NeoMarcoPolo/marcostudio.git
 cd marcostudio
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install .
-.\.venv\Scripts\marcostudio.exe configure --comfy-dir "C:\AI\ComfyUI"
+.\.venv\Scripts\marcostudio.exe configure --comfy-dir "C:\AI\ComfyUI" --comfy-url "http://127.0.0.1:8188"
 .\.venv\Scripts\marcostudio.exe install-nodes
 .\.venv\Scripts\marcostudio.exe models
 ```
