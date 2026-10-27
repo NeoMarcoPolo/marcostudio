@@ -433,6 +433,10 @@ select option { color: var(--text); background: #242629; }
 .onboarding input { min-width: 0; flex: 1; background: #101012; color: #eee; border: 1px solid #414147; padding: 9px; border-radius: 7px; }
 .connection-address, .onboarding code { overflow-wrap: anywhere; }
 .onboarding code { display: block; font-size: 12px; padding: 10px; margin: 8px 0; background: #101012; }
+.connection-help { margin-top: 10px; }
+.connection-help h3 { margin-top: 16px; }
+.connection-help .inline-code { font-family: monospace; overflow-wrap: anywhere; }
+.connection-help [role="alert"] { color: #f0a698; }
 .requirement-details ul { padding: 0; list-style: none; }
 .requirement-details li { margin: 12px 0; overflow-wrap: anywhere; }
 .requirement-details li span { display: block; font-size: 11px; margin: 4px 0; }

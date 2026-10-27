@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ExternalLink, X } from "lucide-react";
 import type { Doctor, Feature, FeatureId } from "./api";
 import { getFeature } from "./browser/catalog";
-import { discover, endpoint, selectConnection } from "./browser/connection";
+import { CONNECTION_DRAFT_KEY, discover, endpoint, normalizeAddress, selectConnection } from "./browser/connection";
+import { ConnectionHelp } from "./ConnectionHelp";
 import { canInstall, installTasks, managerAvailable, reconcileInstalls, resumeDownloads, startDownloads, type InstallTask } from "./browser/manager";
 import type { Requirements } from "./browser/requirements";
 
@@ -14,7 +15,8 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
   refresh: () => Promise<void>; connected: () => Promise<void>; close: () => void;
 }) {
   const report = doctor as Requirements | undefined;
-  const [address, setAddress] = useState(endpoint());
+  const [address, setAddress] = useState(() => localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint());
+  const [connectionHelp, setConnectionHelp] = useState(() => !!localStorage.getItem(CONNECTION_DRAFT_KEY));
   const [candidates, setCandidates] = useState<string[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
@@ -23,13 +25,15 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
   const [tasks, setTasks] = useState<InstallTask[]>(() => installTasks());
   const dialog = useRef<HTMLDialogElement>(null);
   const polling = useRef(false);
+  const connectionPending = useRef(false);
   const current = useRef(true);
   const missing = report?.model_requirements?.filter(model => !model.available) ?? [];
   const downloadable = missing.filter(model => model.installable && canInstall(model));
   const unfinished = tasks.filter(task => missing.some(model => model.url === task.model.url) && !["failed", "succeeded"].includes(task.state));
   const toInstall = downloadable.filter(model => !tasks.some(task => task.model.url === model.url && !["failed", "succeeded"].includes(task.state)));
   const failures = report?.checks.filter(check => check.status === "fail" && (check.name.startsWith("node:") || check.name === "h3_pdd")) ?? [];
-  const ready = !!report?.ready && !checking;
+  const connectedHere = !!report?.connected && !connectionHelp;
+  const ready = !!report?.ready && !checking && connectedHere;
 
   useEffect(() => {
     current.current = true;
@@ -41,7 +45,7 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
   }, []);
 
   const recheck = useCallback(async () => {
-    if (polling.current || !endpoint()) return;
+    if (!current.current || polling.current || connectionPending.current || !endpoint()) return;
     polling.current = true;
     try {
       await refresh();
@@ -65,21 +69,44 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
     return () => { clearInterval(timer); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
   }, [recheck]);
 
-  const choose = async (value: string) => {
+  const choose = useCallback(async (value: string) => {
     selectConnection(value); setAddress(value); setCandidates([]); setTasks(installTasks(value));
+    setConnectionHelp(false); setError("");
     await connected();
     const available = await managerAvailable(value);
     if (current.current) setManager(available);
-  };
-  const connect = async (value?: string) => {
+  }, [connected]);
+  const connect = useCallback(async (value?: string) => {
+    if (!current.current || connectionPending.current || locked || installing || unfinished.length > 0) return;
+    connectionPending.current = true;
     setConnecting(true); setError("");
     try {
-      const found = await discover(value);
+      const target = value?.trim() ? normalizeAddress(value.trim()) : undefined;
+      if (target) {
+        localStorage.setItem(CONNECTION_DRAFT_KEY, target);
+        setAddress(target);
+      }
+      const found = await discover(target);
       if (!current.current) return;
-      if (found.length === 1) await choose(found[0]); else setCandidates(found);
-    } catch (error) { if (current.current) setError(error instanceof Error ? error.message : "Couldn't connect to ComfyUI."); }
-    finally { if (current.current) setConnecting(false); }
-  };
+      if (found.length === 1) await choose(found[0]);
+      else { setConnectionHelp(false); setCandidates(found); }
+    } catch (error) {
+      if (current.current) {
+        setError(error instanceof Error ? error.message : "Couldn't connect to ComfyUI.");
+        setConnectionHelp(true);
+      }
+    } finally { connectionPending.current = false; if (current.current) setConnecting(false); }
+  }, [choose, locked, installing, unfinished.length]);
+
+  useEffect(() => {
+    if (!connectionHelp) return;
+    const retry = () => {
+      if (!document.hidden) void connect(localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || undefined);
+    };
+    window.addEventListener("focus", retry);
+    document.addEventListener("visibilitychange", retry);
+    return () => { window.removeEventListener("focus", retry); document.removeEventListener("visibilitychange", retry); };
+  }, [connectionHelp, connect]);
   const install = async (resume = false) => {
     setInstalling(true); setError("");
     try {
@@ -97,20 +124,25 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
     <div className="onboarding-heading"><h2 id="onboarding-title">Use your ComfyUI</h2><button aria-label="Close setup" onClick={close}><X size={19}/></button></div>
     <p className="onboarding-intro">Connect your running ComfyUI. We’ll check what {feature?.name ?? "Relight"} needs.</p>
     <ol className="onboarding-steps" aria-live="polite">
-      <li className={report?.connected ? "complete" : ""}>
-        <span className="step-mark">{report?.connected ? <Check size={16}/> : "1"}</span>
-        <div><h3>{report?.connected ? "ComfyUI detected" : "ComfyUI"}</h3>
-          {report?.connected ? <p className="connection-address">{report.address}</p> : <button className="setup-primary" disabled={connecting || locked} onClick={() => void connect()}>{connecting ? "Connecting…" : "Connect"}</button>}
+      <li className={connectedHere ? "complete" : ""}>
+        <span className="step-mark">{connectedHere ? <Check size={16}/> : "1"}</span>
+        <div><h3>{connectedHere ? "ComfyUI detected" : "ComfyUI"}</h3>
+          {connectedHere ? <p className="connection-address">{report.address}</p> : !connectionHelp && <>
+            <button className="setup-primary" disabled={connecting || locked} onClick={() => void connect(address)}>{connecting ? "Connecting…" : "Connect"}</button>
+            <p>Allow local-network access if your browser asks.</p>
+          </>}
+          {connectionHelp && <ConnectionHelp address={localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || "http://127.0.0.1:8188"} error={error}
+            busy={connecting || locked || installing || unfinished.length > 0} retry={() => void connect(address)}/>}
           {candidates.length > 1 && <div className="instance-choices"><p>Choose your ComfyUI</p>{candidates.map(value => <button key={value} onClick={() => void choose(value).catch(error => setError(String(error)))}>{value}</button>)}</div>}
-          {(error || report?.connected || endpoint()) && <details className="connection-options"><summary>Use another address</summary>
+          {(connectionHelp || error || report?.connected || endpoint()) && <details className="connection-options"><summary>Use another address</summary>
             <form onSubmit={event => {event.preventDefault(); void connect(address);}}><label htmlFor="comfy-address">ComfyUI address</label><input id="comfy-address" type="url" value={address} placeholder="http://127.0.0.1:8188" disabled={locked || connecting || installing || unfinished.length > 0} onChange={event => setAddress(event.target.value)}/>
               <button disabled={locked || connecting || installing || unfinished.length > 0 || !address.trim()}>Connect</button></form></details>}
         </div>
       </li>
-      <li className={report?.ready ? "complete" : ""}>
-        <span className="step-mark">{report?.ready ? <Check size={16}/> : "2"}</span>
+      <li className={connectedHere && report?.ready ? "complete" : ""}>
+        <span className="step-mark">{connectedHere && report?.ready ? <Check size={16}/> : "2"}</span>
         <div><h3>Models and nodes</h3>
-          {!report?.connected ? <p>Connect to check</p> : checking ? <p>Checking {feature?.name}…</p> : report.ready ? <p>Installed</p> : <>
+          {!connectedHere ? <p>Connect to check</p> : checking ? <p>Checking {feature?.name}…</p> : report.ready ? <p>Installed</p> : <>
             <p>{missing.length > 0 && `${missing.length} model${missing.length === 1 ? "" : "s"} missing`}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>
             {missing.length > 0 && <p>{formatSize(missing.reduce((total, model) => total + model.size, 0))} model downloads</p>}
             <div className="setup-actions">
@@ -133,7 +165,7 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
       </li>
       <li className={ready ? "complete" : ""}><span className="step-mark">{ready ? <Check size={16}/> : "3"}</span><div><h3>{ready ? "Ready" : "Studio"}</h3><p>{ready ? `${feature?.name ?? "Relight"} is ready` : "Waiting for setup"}</p><button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></div></li>
     </ol>
-    {error && <div className="setup-error" role="alert"><p>{error}</p>{!report?.connected && <details><summary>Connection help</summary><p>Keep ComfyUI running on this computer and allow local network access if your browser asks.</p><p>Add this to your existing ComfyUI launch options, then restart ComfyUI when idle:</p><code>--enable-cors-header {location.origin}</code><button onClick={() => void navigator.clipboard.writeText(`--enable-cors-header ${location.origin}`).catch(() => setError("Select and copy the launch option above."))}>Copy</button><p>Using a phone? Its localhost is the phone. Use your computer’s reachable ComfyUI address.</p><button disabled={connecting} onClick={() => void connect()}>Try again</button></details>}</div>}
+    {error && !connectionHelp && <div className="setup-error" role="alert"><p>{error}</p></div>}
     <footer><button onClick={close}>Browse tools</button><a href="https://github.com/NeoMarcoPolo/marcostudio" target="_blank" rel="noopener noreferrer">GitHub <ExternalLink size={13}/></a></footer>
   </dialog>;
 }

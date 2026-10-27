@@ -22,7 +22,19 @@ Leave ComfyUI running, then [open MarcoStudio](https://neomarcopolo.co/marcostud
 
 The [website](https://neomarcopolo.co/marcostudio/) connects directly to ComfyUI running on your computer. No MarcoStudio server or proxy is needed.
 
-Start ComfyUI and open MarcoStudio. A short setup panel checks:
+**Allow the website once.** Add this option to your existing ComfyUI launcher, keeping your other options:
+
+```text
+--enable-cors-header https://neomarcopolo.co
+```
+
+| How you start ComfyUI | Where to add it |
+| --- | --- |
+| Comfy Desktop | Instance ⋮ menu → **Manage → Startup Args → Startup Arguments** |
+| Windows portable | Edit your usual `.bat` launcher; append it to the line containing `ComfyUI\main.py` |
+| Terminal | Append it to your usual ComfyUI launch command |
+
+Restart ComfyUI when its queue is idle, then open MarcoStudio and allow **local-network access** if your browser asks. A short setup panel checks:
 
 1. **ComfyUI detected** — click **Connect** to find your running installation.
 2. **Models and nodes** — click **Install missing** for model downloads, or **Open ComfyUI** to set things up yourself. The panel updates automatically.
@@ -35,7 +47,9 @@ Future visits reconnect and skip completed setup. Your media stays between your 
 <details>
 <summary>Connection and automatic setup</summary>
 
-Connection checks the usual local ports, 8188 and 8000. If it cannot connect, you can enter another address. Allow local-network access if your browser asks. ComfyUI must allow the website's origin; MarcoStudio will show the launch option in connection help.
+Connection checks the usual local ports, 8188 and 8000. If it cannot connect, the connection step shows the exact launch option with a copy button and instructions for your launcher. It checks again when you return from ComfyUI; **Try again** also retries immediately. A custom address survives refresh and is only selected after ComfyUI responds.
+
+Running the frontend at another origin? Copy the option shown in that page's setup panel; it uses that page's origin. The [ComfyUI startup flags reference](https://docs.comfy.org/development/comfyui-server/startup-flags) and [Desktop Startup Args guide](https://docs.comfy.org/installation/desktop/usage/manage#startup-args-tab) explain where the option is applied. On another computer or a phone, enter the ComfyUI address that opens on that device instead of its own localhost.
 
 Automatic downloads use **ComfyUI-Manager 4** on the same connection. If it is unavailable, tools whose requirements are already installed still work. Help appears only when a missing requirement needs it.
 

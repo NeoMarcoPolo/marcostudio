@@ -1,6 +1,7 @@
 import { ServiceError } from "../api";
 
 export const CONNECTION_KEY = "marcostudio.connection.v1";
+export const CONNECTION_DRAFT_KEY = "marcostudio.connection.draft.v1";
 export const endpoint = () => localStorage.getItem(CONNECTION_KEY) || "";
 export function normalizeAddress(address: string) {
   const url = new URL(address.includes("://") ? address : `http://${address}`);
@@ -57,6 +58,7 @@ export async function discover(address?: string) {
 
 export function selectConnection(address: string) {
   localStorage.setItem(CONNECTION_KEY, normalizeAddress(address));
+  localStorage.removeItem(CONNECTION_DRAFT_KEY);
 }
 
 export function clientId() {
