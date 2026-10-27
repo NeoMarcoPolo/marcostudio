@@ -20,9 +20,18 @@ Leave ComfyUI running, then [open MarcoStudio](https://neomarcopolo.co/marcostud
 
 ## Use your ComfyUI
 
-The [website](https://neomarcopolo.co/marcostudio/) connects directly to ComfyUI running on your computer. No MarcoStudio server or proxy is needed.
+Open the [website](https://neomarcopolo.co/marcostudio/) with ComfyUI running. Setup shows one step at a time:
 
-**Allow the website once.** Add this option to your existing ComfyUI launcher, keeping your other options:
+1. **Connect** — allow local-network access if your browser asks. If ComfyUI is open but the connection fails, choose **It's already running**, then **Desktop**, **Portable**, or **Terminal** for the one-time website permission fix.
+2. **Set up** — install the missing models or open ComfyUI to fix missing nodes. Requirements are under **Models and nodes**.
+3. **Ready** — open the studio.
+
+MarcoStudio connects directly to your ComfyUI; no MarcoStudio server or proxy is needed. Future visits reconnect and skip completed setup. Your media stays between your browser and ComfyUI.
+
+<details>
+<summary>Allow website access in ComfyUI</summary>
+
+The connection screen provides a copy button and the instruction for your launcher. Add this option once, keeping your existing options:
 
 ```text
 --enable-cors-header https://neomarcopolo.co
@@ -34,26 +43,22 @@ The [website](https://neomarcopolo.co/marcostudio/) connects directly to ComfyUI
 | Windows portable | Edit your usual `.bat` launcher; append it to the line containing `ComfyUI\main.py` |
 | Terminal | Append it to your usual ComfyUI launch command |
 
-Restart ComfyUI when its queue is idle, then open MarcoStudio and allow **local-network access** if your browser asks. A short setup panel checks:
+Restart ComfyUI when idle, then return to MarcoStudio. It checks again automatically; **Try again** also retries immediately.
 
-1. **ComfyUI detected** — click **Connect** to find your running installation.
-2. **Models and nodes** — click **Install missing** for model downloads, or **Open ComfyUI** to set things up yourself. The panel updates automatically.
-3. **Ready** — click **Open studio**.
+Running the frontend at another origin? Copy the option shown in that page's setup panel. See the [startup flags reference](https://docs.comfy.org/development/comfyui-server/startup-flags) and [Desktop Startup Args guide](https://docs.comfy.org/installation/desktop/usage/manage#startup-args-tab).
 
-Checks advance automatically. Model downloads show their size before you install, reuse matching files, and go into ComfyUI's configured folders. Setup checks your starting tool, Relight by default; other tools can be set up when you use them. Missing node instructions, sources, and licenses are under **Details**.
-
-Future visits reconnect and skip completed setup. Your media stays between your browser and ComfyUI.
+</details>
 
 <details>
 <summary>Connection and automatic setup</summary>
 
-Connection checks the usual local ports, 8188 and 8000. If it cannot connect, the connection step shows the exact launch option with a copy button and instructions for your launcher. It checks again when you return from ComfyUI; **Try again** also retries immediately. A custom address survives refresh and is only selected after ComfyUI responds.
+Connection checks the usual local ports, 8188 and 8000. **Change address** accepts another ComfyUI address, preserves it across refresh, and selects it only after ComfyUI responds. On another computer or a phone, enter the address that opens ComfyUI on that device instead of its own localhost.
 
-Running the frontend at another origin? Copy the option shown in that page's setup panel; it uses that page's origin. The [ComfyUI startup flags reference](https://docs.comfy.org/development/comfyui-server/startup-flags) and [Desktop Startup Args guide](https://docs.comfy.org/installation/desktop/usage/manage#startup-args-tab) explain where the option is applied. On another computer or a phone, enter the ComfyUI address that opens on that device instead of its own localhost.
+Setup checks your starting tool, Relight by default; other tools can be set up when you use them. Model downloads show their size before you install, reuse matching files, and go into ComfyUI's configured folders.
 
 Automatic downloads use **ComfyUI-Manager 4** on the same connection. If it is unavailable, tools whose requirements are already installed still work. Help appears only when a missing requirement needs it.
 
-Automatic setup currently downloads models only. Update built-in nodes in ComfyUI; MarcoStudio's video nodes have a download under **Details**. They are not yet published in the Comfy registry, so automatic node installation is unavailable. Restart ComfyUI yourself when its queue is idle; the panel reconnects and checks again. Onboarding never restarts ComfyUI or submits a generation.
+Automatic setup currently downloads models only. Update built-in nodes in ComfyUI; MarcoStudio's video nodes have a download under **Models and nodes**. They are not yet published in the Comfy registry, so automatic node installation is unavailable. Restart ComfyUI yourself when its queue is idle; the panel reconnects and checks again. Onboarding never restarts ComfyUI or submits a generation.
 
 The browser stores its connection, uploads, and job references locally and recovers job status after refresh. Unknown submission results are checked against ComfyUI's queue/history without resubmitting. Clearing browser data removes those local records; save results you want to keep. The optional Python application stores its own media and history separately.
 

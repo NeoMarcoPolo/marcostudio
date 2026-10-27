@@ -10,8 +10,8 @@ import type { Requirements } from "./browser/requirements";
 export const enteredKey = () => `marcostudio.entered:${endpoint()}`;
 const formatSize = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
-export function Onboarding({feature, featureId, mode, doctor, checking, locked, refresh, connected, close}: {
-  feature?: Feature; featureId: FeatureId; mode: string; doctor?: Doctor; checking: boolean; locked: boolean;
+export function Onboarding({feature, featureId, doctor, checking, locked, refresh, connected, close}: {
+  feature?: Feature; featureId: FeatureId; doctor?: Doctor; checking: boolean; locked: boolean;
   refresh: () => Promise<void>; connected: () => Promise<void>; close: () => void;
 }) {
   const report = doctor as Requirements | undefined;
@@ -24,6 +24,7 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
   const [installing, setInstalling] = useState(false);
   const [tasks, setTasks] = useState<InstallTask[]>(() => installTasks());
   const dialog = useRef<HTMLDialogElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const polling = useRef(false);
   const connectionPending = useRef(false);
   const current = useRef(true);
@@ -32,8 +33,10 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
   const unfinished = tasks.filter(task => missing.some(model => model.url === task.model.url) && !["failed", "succeeded"].includes(task.state));
   const toInstall = downloadable.filter(model => !tasks.some(task => task.model.url === model.url && !["failed", "succeeded"].includes(task.state)));
   const failures = report?.checks.filter(check => check.status === "fail" && (check.name.startsWith("node:") || check.name === "h3_pdd")) ?? [];
-  const connectedHere = !!report?.connected && !connectionHelp;
+  const connectedHere = !!report?.connected && report.address === endpoint() && !connectionHelp && !connecting;
   const ready = !!report?.ready && !checking && connectedHere;
+  const step = connectedHere ? report.ready ? 2 : 1 : 0;
+  const connectionBusy = connecting || locked || installing || unfinished.length > 0;
 
   useEffect(() => {
     current.current = true;
@@ -44,8 +47,10 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
     return () => { current.current = false; document.body.style.overflow = previousOverflow; previous?.focus(); };
   }, []);
 
+  useEffect(() => { heading.current?.focus(); }, [step]);
+
   const recheck = useCallback(async () => {
-    if (!current.current || polling.current || connectionPending.current || !endpoint()) return;
+    if (!current.current || polling.current || connectionPending.current || connectionHelp || !endpoint()) return;
     polling.current = true;
     try {
       await refresh();
@@ -58,7 +63,7 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
     } catch (error) {
       if (current.current) setError(error instanceof Error ? error.message : "Couldn't check setup.");
     } finally { polling.current = false; }
-  }, [refresh, installing]);
+  }, [refresh, installing, connectionHelp]);
 
   useEffect(() => {
     void recheck();
@@ -119,52 +124,47 @@ export function Onboarding({feature, featureId, mode, doctor, checking, locked, 
     } finally { if (current.current) setInstalling(false); }
   };
   const tool = getFeature(featureId);
-  const allModels = tool.models[mode] ?? [];
+  const name = feature?.name ?? "Relight";
   return <dialog ref={dialog} className="onboarding" aria-labelledby="onboarding-title" onCancel={event => {event.preventDefault(); close();}}>
-    <div className="onboarding-heading"><h2 id="onboarding-title">Use your ComfyUI</h2><button aria-label="Close setup" onClick={close}><X size={19}/></button></div>
-    <p className="onboarding-intro">Connect your running ComfyUI. We’ll check what {feature?.name ?? "Relight"} needs.</p>
-    <ol className="onboarding-steps" aria-live="polite">
-      <li className={connectedHere ? "complete" : ""}>
-        <span className="step-mark">{connectedHere ? <Check size={16}/> : "1"}</span>
-        <div><h3>{connectedHere ? "ComfyUI detected" : "ComfyUI"}</h3>
-          {connectedHere ? <p className="connection-address">{report.address}</p> : !connectionHelp && <>
-            <button className="setup-primary" disabled={connecting || locked} onClick={() => void connect(address)}>{connecting ? "Connecting…" : "Connect"}</button>
-            <p>Allow local-network access if your browser asks.</p>
-          </>}
-          {connectionHelp && <ConnectionHelp address={localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || "http://127.0.0.1:8188"} error={error}
-            busy={connecting || locked || installing || unfinished.length > 0} retry={() => void connect(address)}/>}
-          {candidates.length > 1 && <div className="instance-choices"><p>Choose your ComfyUI</p>{candidates.map(value => <button key={value} onClick={() => void choose(value).catch(error => setError(String(error)))}>{value}</button>)}</div>}
-          {(connectionHelp || error || report?.connected || endpoint()) && <details className="connection-options"><summary>Use another address</summary>
-            <form onSubmit={event => {event.preventDefault(); void connect(address);}}><label htmlFor="comfy-address">ComfyUI address</label><input id="comfy-address" type="url" value={address} placeholder="http://127.0.0.1:8188" disabled={locked || connecting || installing || unfinished.length > 0} onChange={event => setAddress(event.target.value)}/>
-              <button disabled={locked || connecting || installing || unfinished.length > 0 || !address.trim()}>Connect</button></form></details>}
-        </div>
-      </li>
-      <li className={connectedHere && report?.ready ? "complete" : ""}>
-        <span className="step-mark">{connectedHere && report?.ready ? <Check size={16}/> : "2"}</span>
-        <div><h3>Models and nodes</h3>
-          {!connectedHere ? <p>Connect to check</p> : checking ? <p>Checking {feature?.name}…</p> : report.ready ? <p>Installed</p> : <>
-            <p>{missing.length > 0 && `${missing.length} model${missing.length === 1 ? "" : "s"} missing`}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>
-            {missing.length > 0 && <p>{formatSize(missing.reduce((total, model) => total + model.size, 0))} model downloads</p>}
-            <div className="setup-actions">
-              {manager && toInstall.length > 0 && <button className="setup-primary" disabled={installing || checking} onClick={() => void install()}>{installing ? "Starting…" : "Install missing"}</button>}
-              <a href={report.address} target="_blank" rel="noopener noreferrer">Open ComfyUI <ExternalLink size={13}/></a>
-            </div>
-            {unfinished.length > 0 && <div className="install-status"><p>{unfinished.some(task => task.state === "unknown" || task.state === "submitting") ? "Checking whether ComfyUI accepted the downloads…" : `Waiting for ${unfinished.length} download${unfinished.length === 1 ? "" : "s"}`}</p><button disabled={installing} onClick={() => void install(true)}>Resume downloads</button></div>}
-            {tasks.filter(task => task.state === "failed" && missing.some(model => model.url === task.model.url)).map(task => <p className="failure-text" key={task.id}>{task.model.filename}: {task.error}</p>)}
-            {tasks.some(task => task.state === "succeeded" && missing.some(model => model.url === task.model.url)) && <p>Downloaded. Check the model in ComfyUI and restart ComfyUI when idle.</p>}
-            {!manager && missing.length > 0 && <details><summary>Enable downloads in ComfyUI</summary><p>Enable ComfyUI-Manager for automatic model downloads. You can also add the files below yourself.</p><a href="https://docs.comfy.org/manager" target="_blank" rel="noopener noreferrer">ComfyUI-Manager help</a></details>}
-            <details className="requirement-details"><summary>Details</summary>
-              {failures.map(check => <p key={check.name}><strong>{check.name.replace("node:", "")}</strong><br/>{check.message}</p>)}
-              {report?.checks.filter(check => check.name.startsWith("download:")).map(check => <p key={check.name}>{check.message}</p>)}
-              {failures.some(check => check.name.includes("MarcoStudio") || check.name === "h3_pdd") && <p><a href="./marcostudio-nodes.zip" download>Download MarcoStudio nodes</a><br/>Extract the marcostudio folder into ComfyUI’s custom_nodes folder. Restart ComfyUI when idle.</p>}
-              <ul>{allModels.map(model => <li key={model.key}><a href={model.url}>{model.filename}</a><span>{model.category} · {formatSize(model.size)}</span><a href={`https://huggingface.co/${model.repository}`} target="_blank" rel="noopener noreferrer">Source &amp; license</a></li>)}</ul>
-              <a href={tool.workflow_url} target="_blank" rel="noopener noreferrer">View workflow</a>{" · "}<a href={tool.source_url} target="_blank" rel="noopener noreferrer">Upstream source</a>
-            </details>
-          </>}
-        </div>
-      </li>
-      <li className={ready ? "complete" : ""}><span className="step-mark">{ready ? <Check size={16}/> : "3"}</span><div><h3>{ready ? "Ready" : "Studio"}</h3><p>{ready ? `${feature?.name ?? "Relight"} is ready` : "Waiting for setup"}</p><button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></div></li>
+    <div className="onboarding-heading"><h2 ref={heading} tabIndex={-1} id="onboarding-title">{["Connect ComfyUI", `Set up ${name}`, `${name} is ready`][step]}</h2><button aria-label="Close setup" onClick={close}><X size={19}/></button></div>
+    <ol className="setup-progress" aria-label="Setup progress">
+      {["Connect", "Set up", "Ready"].map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined} className={step > index ? "complete" : ""}><span aria-hidden="true">{step > index ? <Check size={12}/> : index + 1}</span>{label}</li>)}
     </ol>
+    <div className="setup-panel">
+      {step === 0 && <>
+        {connectionHelp ? <ConnectionHelp address={localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || "http://127.0.0.1:8188"} error={error}
+          busy={connectionBusy} retry={() => void connect(address)}/> : candidates.length > 1 ?
+          <div className="instance-choices"><p>Choose your ComfyUI</p>{candidates.map(value => <button key={value} disabled={connectionBusy} onClick={() => void choose(value).catch(error => setError(String(error)))}>{value}</button>)}</div> : <>
+            <p>Start ComfyUI on this computer, then connect.</p>
+            <button className="setup-primary" disabled={connectionBusy} onClick={() => void connect(address)}>{connecting ? "Connecting…" : "Connect"}</button>
+          </>}
+      </>}
+      {connectedHere && <p className="setup-connected"><Check size={14}/> ComfyUI connected</p>}
+      {step === 1 && <>
+        <p className="requirements-summary">{missing.length > 0 && <span>{missing.length} model{missing.length === 1 ? "" : "s"} missing</span>}{missing.length > 0 && <span> · {formatSize(missing.reduce((total, model) => total + model.size, 0))}</span>}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>
+        <div className="setup-actions">
+          {manager && toInstall.length > 0 && <button className="setup-primary" disabled={installing || checking} onClick={() => void install()}>{installing ? "Starting…" : "Install missing"}</button>}
+          <a href={report?.address} target="_blank" rel="noopener noreferrer">Open ComfyUI <ExternalLink size={13}/></a>
+        </div>
+        {unfinished.length > 0 && <div className="install-status"><p>{unfinished.some(task => task.state === "unknown" || task.state === "submitting") ? "Checking downloads…" : `Waiting for ${unfinished.length} download${unfinished.length === 1 ? "" : "s"}`}</p><button disabled={installing} onClick={() => void install(true)}>Resume downloads</button></div>}
+        {tasks.filter(task => task.state === "failed" && missing.some(model => model.url === task.model.url)).map(task => <p className="failure-text" key={task.id}>{task.model.filename}: {task.error}</p>)}
+        {tasks.some(task => task.state === "succeeded" && missing.some(model => model.url === task.model.url)) && <p>Downloaded. Restart ComfyUI when idle to load the model.</p>}
+        <details className="requirement-details"><summary>Models and nodes</summary>
+          {!manager && missing.length > 0 && <p><a href="https://docs.comfy.org/manager" target="_blank" rel="noopener noreferrer">Enable ComfyUI-Manager</a> for automatic downloads, or add the files below.</p>}
+          {failures.map(check => <p key={check.name}><strong>{check.name.replace("node:", "")}</strong><br/>{check.message}</p>)}
+          {report?.checks.filter(check => check.name.startsWith("download:")).map(check => <p key={check.name}>{check.message}</p>)}
+          {failures.some(check => check.name.includes("MarcoStudio") || check.name === "h3_pdd") && <p><a href="./marcostudio-nodes.zip" download>Download MarcoStudio nodes</a><br/>Extract the marcostudio folder into ComfyUI’s custom_nodes folder. Restart ComfyUI when idle.</p>}
+          {missing.length > 0 && <ul>{missing.map(model => <li key={model.key}><a href={model.url}>{model.filename}</a><span>{model.category} · {formatSize(model.size)}</span><a href={`https://huggingface.co/${model.repository}`} target="_blank" rel="noopener noreferrer">Source &amp; license</a></li>)}</ul>}
+          <a href={tool.workflow_url} target="_blank" rel="noopener noreferrer">View workflow</a>{" · "}<a href={tool.source_url} target="_blank" rel="noopener noreferrer">Upstream source</a>
+        </details>
+      </>}
+      {step === 2 && <button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button>}
+      <details className="connection-options"><summary>Change address</summary>
+        <form onSubmit={event => {event.preventDefault(); void connect(address);}}><label htmlFor="comfy-address">ComfyUI address</label><input id="comfy-address" type="url" value={address} placeholder="http://127.0.0.1:8188" disabled={connectionBusy} onChange={event => setAddress(event.target.value)}/>
+          <button disabled={connectionBusy || !address.trim()}>Connect</button></form>
+        <p>Use the address that opens ComfyUI on this device.</p>
+      </details>
+    </div>
     {error && !connectionHelp && <div className="setup-error" role="alert"><p>{error}</p></div>}
     <footer><button onClick={close}>Browse tools</button><a href="https://github.com/NeoMarcoPolo/marcostudio" target="_blank" rel="noopener noreferrer">GitHub <ExternalLink size={13}/></a></footer>
   </dialog>;

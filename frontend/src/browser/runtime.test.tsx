@@ -95,10 +95,10 @@ describe("direct ComfyUI onboarding", () => {
     missing = true;
     const view = render(<App/>);
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", {name: "Connect"}));
-    await within(dialog).findByText("ComfyUI detected");
+    fireEvent.click(within(dialog).getAllByRole("button", {name: "Connect"})[0]);
+    await within(dialog).findByText("ComfyUI connected");
     await within(dialog).findByText("1 model missing");
-    expect(within(dialog).getByRole("button", {name: "Open studio"})).toBeDisabled();
+    expect(within(dialog).queryByRole("button", {name: "Open studio"})).not.toBeInTheDocument();
     missing = false;
     await act(async () => { window.dispatchEvent(new Event("focus")); });
     await waitFor(() => expect(within(dialog).getByRole("button", {name: "Open studio"})).toBeEnabled());
@@ -121,19 +121,29 @@ describe("direct ComfyUI onboarding", () => {
     expect((await checkRequirements("relight", "flash")).ready).toBe(true);
   });
 
-  it("keeps an unavailable saved endpoint and exposes the website permission fix after failure", async () => {
+  it("keeps a failed connection on the current step and shows only the selected launcher fix", async () => {
     selectConnection("http://127.0.0.1:9000"); available = false;
     await expect(discover()).rejects.toThrow("Couldn't connect");
     expect(localStorage.getItem(CONNECTION_KEY)).toBe("http://127.0.0.1:9000");
     expect(calls.filter(call => call.path === "/system_stats")).toHaveLength(1);
     render(<App/>);
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).queryByRole("heading", {name: "Allow this website in ComfyUI"})).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Connect to check")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", {name: "Open studio"})).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getAllByRole("button", {name: "Connect"})[0]);
-    expect(await within(dialog).findByRole("heading", {name: "Allow this website in ComfyUI"})).toBeVisible();
+    const help = await within(dialog).findByRole("button", {name: "It's already running"});
+    expect(within(dialog).queryByText(`--enable-cors-header ${location.origin}`)).not.toBeInTheDocument();
+    fireEvent.click(help);
+    expect(within(dialog).queryByText(`--enable-cors-header ${location.origin}`)).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", {name: "Desktop"}));
+    expect(within(dialog).getByText(/Startup Arguments/)).toBeVisible();
+    expect(within(dialog).queryByText(/Edit your .bat launcher/)).not.toBeInTheDocument();
     expect(within(dialog).getByText(`--enable-cors-header ${location.origin}`)).toBeVisible();
     expect(within(dialog).getByRole("button", {name: "Copy launch option"})).toBeVisible();
     expect(within(dialog).getByRole("button", {name: "Try again"})).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", {name: "Portable"}));
+    expect(within(dialog).getByText(/Edit your .bat launcher/)).toBeVisible();
+    expect(within(dialog).queryByText(/Startup Arguments/)).not.toBeInTheDocument();
     expect(calls.filter(call => call.method !== "GET")).toEqual([]);
   });
 
@@ -143,12 +153,14 @@ describe("direct ComfyUI onboarding", () => {
     vi.stubGlobal("navigator", Object.assign(Object.create(navigator), {clipboard: {writeText: copy}}));
     const view = render(<App/>);
     let dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", {name: "Connect"}));
+    fireEvent.click(within(dialog).getAllByRole("button", {name: "Connect"})[0]);
     await within(dialog).findByRole("button", {name: "Try again"});
-    fireEvent.click(within(dialog).getByText("Use another address"));
+    fireEvent.click(within(dialog).getByText("Change address"));
     fireEvent.change(within(dialog).getByLabelText("ComfyUI address"), {target: {value: "http://127.0.0.1:9194/"}});
     fireEvent.submit(within(dialog).getByLabelText("ComfyUI address").closest("form")!);
     await waitFor(() => expect(within(dialog).getByRole("button", {name: "Try again"})).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", {name: "It's already running"}));
+    fireEvent.click(within(dialog).getByRole("button", {name: "Terminal"}));
     fireEvent.click(within(dialog).getByRole("button", {name: "Copy launch option"}));
     await within(dialog).findByRole("button", {name: "Copied"});
     expect(copy).toHaveBeenCalledWith(`--enable-cors-header ${location.origin}`);
@@ -158,10 +170,10 @@ describe("direct ComfyUI onboarding", () => {
     expect(within(dialog).getByLabelText("ComfyUI address")).toHaveValue("http://127.0.0.1:9194");
     available = true;
     await act(async () => { window.dispatchEvent(new Event("focus")); });
-    await within(dialog).findByText("ComfyUI detected");
+    await within(dialog).findByText("ComfyUI connected");
     await waitFor(() => expect(within(dialog).getByRole("button", {name: "Open studio"})).toBeEnabled());
     expect(localStorage.getItem(CONNECTION_KEY)).toBe("http://127.0.0.1:9194");
-    expect(within(dialog).queryByRole("heading", {name: "Allow this website in ComfyUI"})).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", {name: "Copy launch option"})).not.toBeInTheDocument();
     expect(calls.filter(call => call.method !== "GET")).toEqual([]);
   });
 });

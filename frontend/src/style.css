@@ -415,28 +415,40 @@ select option { color: var(--text); background: #242629; }
 .onboarding h2 { font-size: 22px; margin: 0; letter-spacing: -.5px; }
 .onboarding h3 { font-size: 14px; margin: 0 0 6px; }
 .onboarding p { font-size: 13px; line-height: 1.5; color: #a6a6b0; margin: 5px 0 10px; }
-.onboarding-intro { max-width: 340px; }
+.onboarding h2:focus { outline: none; }
 .onboarding button, .onboarding a { font-size: 12px; }
 .onboarding button { min-height: 36px; padding: 7px 12px; border: 1px solid #414147; border-radius: 8px; background: #26262b; color: #eee; }
 .onboarding button:disabled { opacity: .4; cursor: default; }
 .onboarding .setup-primary { background: #eaff72; color: #121408; border-color: #eaff72; font-weight: 600; }
 .onboarding a { color: #d6d6df; display: inline-flex; align-items: center; gap: 4px; }
-.onboarding-steps { list-style: none; padding: 0; margin: 24px 0; }
-.onboarding-steps > li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 13px; padding: 0 0 24px; }
-.onboarding-steps > li:last-child { padding-bottom: 0; }
-.step-mark { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid #414147; border-radius: 50%; font-size: 12px; color: #aaa; }
-.complete > .step-mark { background: #eaff721a; color: #eaff72; border-color: #eaff7266; }
+.setup-progress { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0; margin: 24px 0; }
+.setup-progress li { display: flex; align-items: center; gap: 7px; padding-top: 10px; border-top: 2px solid #36363b; font-size: 12px; color: #777780; }
+.setup-progress li[aria-current], .setup-progress li.complete { color: #eaff72; border-color: #eaff72; }
+.setup-progress li span { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; }
+.setup-panel { margin-bottom: 24px; }
+.setup-panel > .setup-primary, .setup-actions { margin-top: 16px; }
+.onboarding .setup-connected { display: flex; align-items: center; gap: 6px; color: #c8d68c; }
+.onboarding .requirements-summary { margin-top: 16px; }
+.onboarding .setup-link { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; margin-top: 12px; border: 0; background: transparent; color: #d6d6df; }
+.onboarding .setup-link:hover { color: #fff; text-decoration: underline; }
+.onboarding .setup-back { margin: -8px 0 12px; color: #a6a6b0; }
 .onboarding details { margin-top: 12px; font-size: 12px; color: #aaa; }
 .onboarding summary { cursor: pointer; padding: 4px 0; }
 .onboarding form { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .onboarding form label { width: 100%; }
 .onboarding input { min-width: 0; flex: 1; background: #101012; color: #eee; border: 1px solid #414147; padding: 9px; border-radius: 7px; }
-.connection-address, .onboarding code { overflow-wrap: anywhere; }
-.onboarding code { display: block; font-size: 12px; padding: 10px; margin: 8px 0; background: #101012; }
-.connection-help { margin-top: 10px; }
-.connection-help h3 { margin-top: 16px; }
+.onboarding code { overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.launcher-picker { border: 0; margin: 0; padding: 0; min-width: 0; }
+.launcher-picker legend { font-size: 13px; margin-bottom: 12px; }
+.launcher-picker > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.launcher-picker button[aria-pressed="true"] { color: #eaff72; border-color: #a2ae53; background: #eaff720b; }
+.launcher-fix { margin-top: 18px; }
+.launch-option { display: flex; align-items: center; gap: 12px; margin: 12px 0; padding: 12px; border: 1px solid #36363b; border-radius: 8px; background: #101012; }
+.launch-option code { flex: 1; min-width: 0; }
+.launch-option button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.launcher-fix > .setup-primary { margin-top: 8px; }
 .connection-help .inline-code { font-family: monospace; overflow-wrap: anywhere; }
-.connection-help [role="alert"] { color: #f0a698; }
+.onboarding .connection-options { margin-top: 18px; }
 .requirement-details ul { padding: 0; list-style: none; }
 .requirement-details li { margin: 12px 0; overflow-wrap: anywhere; }
 .requirement-details li span { display: block; font-size: 11px; margin: 4px 0; }

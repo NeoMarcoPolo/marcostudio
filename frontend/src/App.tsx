@@ -809,7 +809,7 @@ export default function App() {
         </section>
         </div>
       </main>
-      {showSettings && isBrowserRuntime() && <Onboarding feature={feature} featureId={featureId} mode={toolSettings.mode}
+      {showSettings && isBrowserRuntime() && <Onboarding feature={feature} featureId={featureId}
         doctor={doctor} checking={checking} locked={!!activeJob || posting || !!retry} refresh={refreshDoctor}
         connected={async () => {
           const value = await api<StudioSettings>("/api/settings");
