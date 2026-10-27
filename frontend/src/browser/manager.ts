@@ -19,6 +19,7 @@ export function saveInstallTasks(address: string, updates: InstallTask[]) {
   for (const task of updates) {
     const previous = tasks.get(task.id);
     if (previous && ["failed", "succeeded"].includes(previous.state) && !["failed", "succeeded"].includes(task.state)) continue;
+    if (previous?.state === "queued" && ["submitting", "unknown"].includes(task.state)) continue;
     tasks.set(task.id, {...previous, ...task});
   }
   write(address, "installs", [...tasks.values()]);
@@ -72,7 +73,7 @@ export async function reconcileInstalls(address = endpoint()) {
     }
   }
   saveInstallTasks(address, tasks);
-  return tasks;
+  return installTasks(address);
 }
 
 export async function startDownloads(models: Model[]) {

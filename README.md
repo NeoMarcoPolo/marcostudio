@@ -16,11 +16,11 @@ No MarcoStudio account or credits. The [application and workflow source](https:/
 2. **Start ComfyUI.** Open the app or run your installation's launcher. Wait for startup to finish.
 3. **Check it opens.** Open the local address shown by ComfyUI in your browser and confirm its editor loads. Keep that address for MarcoStudio's connection settings.
 
-Leave ComfyUI running, then [run MarcoStudio locally](#run-the-current-alpha-windows) or [start the browser frontend](#development). MarcoStudio checks the models and nodes needed for the tool you choose.
+Leave ComfyUI running, then [open MarcoStudio](https://neomarcopolo.co/marcostudio/) or [run it locally](#run-the-current-alpha-windows). MarcoStudio checks the models and nodes needed for the tool you choose.
 
 ## Use your ComfyUI
 
-The browser interface connects directly to ComfyUI. No MarcoStudio server or proxy is needed. This flow is available in the local development build; a public hosted release is not deployed yet.
+The [website](https://neomarcopolo.co/marcostudio/) connects directly to ComfyUI running on your computer. No MarcoStudio server or proxy is needed.
 
 Start ComfyUI and open MarcoStudio. A short setup panel checks:
 
@@ -43,7 +43,7 @@ Automatic setup currently downloads models only. Update built-in nodes in ComfyU
 
 The browser stores its connection, uploads, and job references locally and recovers job status after refresh. Unknown submission results are checked against ComfyUI's queue/history without resubmitting. Clearing browser data removes those local records; save results you want to keep. The optional Python application stores its own media and history separately.
 
-Readiness checks loaded node contracts and model names visible in ComfyUI. It does not verify file checksums. HTTPS browser permission behavior and real Manager downloads still need release validation; the local build has protocol and recovery tests.
+Readiness checks loaded node contracts and model names visible in ComfyUI. It does not verify file checksums. Relight model downloads were checked on a fresh Windows installation with ComfyUI 0.42.0 and Manager 4.2.2. Hosted HTTPS browser permissions still need release validation.
 
 </details>
 

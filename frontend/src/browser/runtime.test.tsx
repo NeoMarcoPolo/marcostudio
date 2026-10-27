@@ -4,7 +4,7 @@ import App from "../App";
 import { api, post, useBrowserRuntime, type Job } from "../api";
 import { catalog, compile, getFeature } from "./catalog";
 import { CONNECTION_KEY, discover, selectConnection } from "./connection";
-import { managerAvailable, reconcileInstalls, startDownloads } from "./manager";
+import { installTasks, managerAvailable, reconcileInstalls, startDownloads } from "./manager";
 import { checkRequirements } from "./requirements";
 import { browserApi } from "./runtime";
 import { getAsset, uploadAsset } from "./assets";
@@ -193,6 +193,39 @@ describe("native generation and installation recovery", () => {
     expect(submissions[1].body).toMatchObject({save_path: "default", type: "diffusion_model", url: model.url});
     expect(submissions[1].body.ui_id).not.toBe(task.id);
     expect(calls.filter(call => call.path.endsWith("/start"))).toHaveLength(1);
+  });
+
+  it("keeps an acknowledged download queued when an older status poll finishes later", async () => {
+    selectConnection(address); manager = true;
+    const nativeFetch = fetch;
+    let acceptDownload!: () => void;
+    let finishPoll!: () => void;
+    const acknowledgement = new Promise<void>(resolve => { acceptDownload = resolve; });
+    const historyResponse = new Promise<void>(resolve => { finishPoll = resolve; });
+    let pollStarted = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await nativeFetch(input, init);
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/install_model")) await acknowledgement;
+      if (url.pathname.endsWith("/history") && url.searchParams.has("ui_id")) {
+        pollStarted = true;
+        await historyResponse;
+      }
+      return response;
+    }));
+    const model = getFeature("relight").models.flash[0];
+    const download = startDownloads([model]);
+    await waitFor(() => expect(installTasks()[0]?.state).toBe("submitting"));
+    const poll = reconcileInstalls();
+    await waitFor(() => expect(pollStarted).toBe(true));
+    acceptDownload();
+    await download;
+    expect(installTasks()[0].state).toBe("queued");
+    finishPoll();
+    expect((await poll)[0].state).toBe("queued");
+    expect(installTasks()[0].state).toBe("queued");
+    await startDownloads([model]);
+    expect(calls.filter(call => call.path.endsWith("/install_model"))).toHaveLength(1);
   });
 
   it("doesn't declare a tool ready while a newly visible model is still downloading", async () => {
