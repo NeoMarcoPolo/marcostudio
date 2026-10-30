@@ -96,6 +96,17 @@ async function installModels(address: string, models: Model[]) {
   if (!await managerAvailable(address)) throw new Error("Open ComfyUI to enable model downloads.");
   const tasks = await reconcileInstalls(address);
   const unique = [...new Map(models.map(model => [model.url, model])).values()];
+  // Recheck the whole queue immediately before a batch. Another browser can
+  // start a task after the last readiness poll; client-filtered counts miss it.
+  let status: Status;
+  try { status = await request<Status>(address, `${ROOT}/status`); }
+  catch { throw new Error("Couldn't check the ComfyUI Manager queue. Check the connection and try again."); }
+  if (!Number.isInteger(status?.pending_count) || status.pending_count < 0
+    || !Number.isInteger(status?.in_progress_count) || status.in_progress_count < 0
+    || typeof status?.is_processing !== "boolean")
+    throw new Error("Couldn't check the ComfyUI Manager queue. Check the connection and try again.");
+  if (status.pending_count > 0 || status.in_progress_count > 0 || status.is_processing)
+    throw new Error("ComfyUI Manager has setup tasks in progress. Wait for its queue to finish, then try again.");
   let queued = false;
   for (const model of unique) {
     if (!canInstall(model)) continue;

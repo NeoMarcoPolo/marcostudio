@@ -175,10 +175,10 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
                   onChange={event => { setSelected(previous => event.target.checked ? [...previous, model.url] : previous.filter(url => url !== model.url)); setConfirmed(""); }}/><span>{model.filename}</span></label>
                   : <span className="model-name model-unavailable">{model.filename}</span>}
                 <span className="model-size">{formatSize(model.size)}</span>
+                <button className="model-details-button" aria-label={`Details for ${model.filename}`} onClick={() => setView(model.url)}>Details</button>
               </div>
               {queued && <span className="model-state">Already queued</span>}
               {!queued && !eligible && <span className="model-state">{manager ? "Manual download required" : "Enable ComfyUI-Manager for automatic downloads, or download manually"}</span>}
-              <button className="model-details-button" aria-label={`Details for ${model.filename}`} onClick={() => setView(model.url)}>Details</button>
             </li>;
           })}</ul>
           {manager && toInstall.length > 0 && <>
