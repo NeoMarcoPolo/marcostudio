@@ -39,6 +39,7 @@ def test_bounded_queue_deduplicates_and_cancellation_waits_for_worker_exit(tmp_p
     worker = worker_module.VerificationWorker(verifier)
     first = worker.submit("a", tmp_path / "a", 1, "x")
     assert entered.wait(3)
+    assert worker.is_busy()
     assert worker.submit("a", tmp_path / "a", 1, "x") == first
     second = worker.submit("b", tmp_path / "b", 1, "y")
     assert worker.submit("c", tmp_path / "c", 1, "z") == ("busy", None)
@@ -49,6 +50,7 @@ def test_bounded_queue_deduplicates_and_cancellation_waits_for_worker_exit(tmp_p
     wait_until(lambda: worker.status(second[1]) == "verified")
     assert worker.status(first[1]) == "cancelled"
     assert calls == [tmp_path / "a", tmp_path / "b"]
+    assert not worker.is_busy()
 
 
 def test_cancel_queued_work_does_not_execute(tmp_path):

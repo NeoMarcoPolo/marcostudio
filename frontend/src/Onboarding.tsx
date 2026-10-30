@@ -7,7 +7,7 @@ import { ConnectionHelp } from "./ConnectionHelp";
 import { canInstall, installTasks, managerAvailable, reconcileInstalls, resumeDownloads, startDownloads, type InstallTask } from "./browser/manager";
 import type { Requirements } from "./browser/requirements";
 import { checkStorage, spaceGroups, supportsIntegrityVerification, supportsStoragePairing, type SpaceReport } from "./browser/modelSpace";
-import { pairIntegrity, unpairIntegrity, verifyModelSnapshots } from "./browser/integrity";
+import { allowUnverified, clearUnverified, currentIntegrityPair, pairIntegrity, unpairIntegrity, verifyModelSnapshots } from "./browser/integrity";
 
 export const enteredKey = () => `marcostudio.entered:${endpoint()}`;
 const formatSize = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
@@ -101,7 +101,9 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const [spaceSupported, setSpaceSupported] = useState(false);
   const [integritySupported, setIntegritySupported] = useState(false);
   const [pairInput, setPairInput] = useState("");
-  const [pair, setPair] = useState<{address: string; token: string} | null>(null);
+  const [pair, setPair] = useState<{address: string; token: string} | null>(() => currentIntegrityPair(endpoint()) ?? null);
+  const [unverifiedConsent, setUnverifiedConsent] = useState(false);
+  const [consenting, setConsenting] = useState(false);
   const [space, setSpace] = useState<SpaceReport | null>(null);
   const [spaceMessage, setSpaceMessage] = useState("");
   const [spaceChecking, setSpaceChecking] = useState(false);
@@ -148,7 +150,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
 
   useEffect(() => {
     const address = endpoint(); let active = true;
-    setSpaceSupported(false); setIntegritySupported(false); setPair(null); setPairInput(""); setSpace(null); setSpaceMessage("");
+    setSpaceSupported(false); setIntegritySupported(false); setPair(currentIntegrityPair(address) ?? null); setPairInput(""); setUnverifiedConsent(false); setSpace(null); setSpaceMessage("");
     if (connectedHere) {
       void supportsStoragePairing(address).then(available => { if (active) setSpaceSupported(available); });
       void supportsIntegrityVerification(address).then(available => { if (active) setIntegritySupported(available); });
@@ -317,9 +319,13 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {pair && <button type="button" onClick={() => {verifyAbort.current?.abort(); unpairIntegrity(); setPair(null); setSpace(null); setSpaceMessage(""); void refresh();}}>Unpair helper</button>}
         {presentModels.length > 0 && unverified && <section aria-label="Model integrity verification">
           <p>Some model files were found but their checksums have not been checked in this session. Checks read the full files and can take a while. Files can change during or afterward.</p>
-          {!integritySupported && <p>Model checksum checks are unavailable on this ComfyUI instance. Enable the helper and its platform-specific checksum option, then restart ComfyUI.</p>}
+          {!integritySupported && <p>Model checksum checks are unavailable on this ComfyUI instance. <a href="./marcostudio-nodes.zip" download>Download or update MarcoStudio nodes</a>, enable the helper and its platform-specific checksum option, then restart ComfyUI.</p>}
           {pair && integritySupported && <button disabled={verifying || checking || queueBlocked || pendingDownloads} onClick={() => {const target = endpoint(), controller = new AbortController(); verifyAbort.current = controller; setVerifying(true); setVerificationMessage(""); void verifyModelSnapshots(target, presentModels, message => {if (current.current) setVerificationMessage(message);}, controller.signal).then(async () => {if (current.current && endpoint() === target) await refresh();}).catch(error => {if (current.current) setVerificationMessage(error instanceof Error ? error.message : "Model verification failed.");}).finally(() => {if (current.current) setVerifying(false);});}}>{verifying ? "Verifying…" : "Verify model files"}</button>}
           {verifying && <button type="button" onClick={() => verifyAbort.current?.abort()}>Cancel verification</button>}
+          <label><input type="checkbox" checked={unverifiedConsent} onChange={event => setUnverifiedConsent(event.target.checked)}/>
+            I understand these model files have not been verified and may be incomplete or corrupted.</label>
+          <button type="button" disabled={!unverifiedConsent || consenting || verifying || checking || queueBlocked || pendingDownloads}
+            onClick={() => {const target = endpoint(); setConsenting(true); setVerificationMessage(""); void allowUnverified(target, presentModels).then(async () => {if (current.current && endpoint() === target) await refresh();}).catch(error => {if (current.current) setVerificationMessage(error instanceof Error ? error.message : "Cannot continue without verification.");}).finally(() => {if (current.current) setConsenting(false);});}}>Continue without verification</button>
         </section>}
         {verificationMessage && <p role="status">{verificationMessage}</p>}
         {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
@@ -370,7 +376,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {tasks.some(task => task.state === "succeeded" && missing.some(model => model.url === task.model.url)) && <p>Downloaded. Restart ComfyUI when idle to load the model.</p>}
         {!reviewModels && <div className="setup-secondary"><button onClick={() => setView("requirements")}>Models and nodes</button><button onClick={() => setView("connection")}>Change address</button></div>}
       </>}
-      {view === "setup" && step === 2 && <><p>Model checksums matched during their last checks. Files can change during or afterward; MarcoStudio checks for observed changes again before starting a task.</p>{recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}<button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></>}
+      {view === "setup" && step === 2 && <><p>{report?.checks.some(check => check.name.startsWith("integrity-unverified:") && check.status === "warn") ? "Some model files are unverified. You chose to continue without a checksum check for this session." : "Model checksums matched during their last checks. Files can change during or afterward; MarcoStudio checks for observed changes again before starting a task."}</p>{report?.checks.some(check => check.name.startsWith("integrity-unverified:") && check.status === "warn") && <button type="button" onClick={() => {clearUnverified(); void refresh();}}>Stop using unverified models</button>}{recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}<button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></>}
       {view === "setup" && step !== 1 && <div className="setup-secondary"><button onClick={() => setView("connection")}>Change address</button></div>}
       {view === "requirements" && <section className="requirement-details">
           {!manager && missing.length > 0 && <p><a href="https://docs.comfy.org/manager" target="_blank" rel="noopener noreferrer">Enable ComfyUI-Manager</a> for automatic downloads, or add the files below.</p>}

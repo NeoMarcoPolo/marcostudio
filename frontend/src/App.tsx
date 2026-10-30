@@ -561,10 +561,11 @@ export default function App() {
                 : checking
                   ? "Checking connection…"
                   : doctor?.ready
-                    ? "ComfyUI connected"
+                    ? doctor.checks.some(check => check.name.startsWith("integrity-unverified:") && check.status === "warn") ? "Connected · Models unverified" : "ComfyUI connected"
                     : "Setup needed"}
           </div>}
         </div>
+        {!checking && doctor?.ready && doctor.checks.some(check => check.name.startsWith("integrity-unverified:") && check.status === "warn") && <section className="setup-banner" aria-label="Models unverified"><div><strong>Models unverified</strong><span>You chose to continue without verifying some model files in this session.</span></div><button onClick={() => setShowSettings(true)}>Review setup</button></section>}
         {!checking && !doctor?.ready && <section className="setup-banner" aria-label="Setup needed">
           <div><strong>Setup needed</strong><span>Finish setup to use {feature?.name ?? "Relight"}.</span></div>
           <button disabled={!studio} onClick={() => setShowSettings(true)}>Open setup <ArrowUpRight size={15} aria-hidden="true"/></button>

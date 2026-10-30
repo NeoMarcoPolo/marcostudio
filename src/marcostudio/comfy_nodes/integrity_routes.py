@@ -148,4 +148,8 @@ def handlers(pairing, service_factory=None):
             return web.json_response({"state": "unavailable"}, status=404, headers=headers)
         return web.json_response({"cancelled": service.cancel(job)}, headers=headers)
 
+    def is_busy():
+        return admission.locked() or bool(service is not None and service.is_busy())
+
+    start.is_busy = is_busy
     return start, status, cancel

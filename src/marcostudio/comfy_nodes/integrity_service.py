@@ -93,6 +93,9 @@ class IntegrityService:
             return {"state": "changed"}
         return {"state": "checksum_matched", "checked_at": evidence[2]}
 
+    def is_busy(self):
+        return self._worker.is_busy()
+
     def cancel(self, job_id):
         return self._worker.cancel(job_id)
 

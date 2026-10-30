@@ -62,6 +62,10 @@ class VerificationWorker:
                 self._pending = job
             return "accepted", job.id
 
+    def is_busy(self) -> bool:
+        with self._lock:
+            return self._active is not None or self._pending is not None
+
     def cancel(self, job_id: str) -> bool:
         with self._lock:
             job = self._results.get(job_id)

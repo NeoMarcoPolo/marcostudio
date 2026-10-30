@@ -203,3 +203,35 @@ def test_fragmented_json_is_accepted_and_oversized_body_rejected():
         assert (await start(request)).status == 400
         assert calls == [identity]
     asyncio.run(run())
+
+
+def test_busy_signal_tracks_worker_without_exposing_model_identity():
+    import json
+    identity = next(iter(module.MODELS))
+    job = "a" * 24
+    class Service:
+        active = False
+        def submit(self, _identity):
+            self.active = True
+            return "accepted", job
+        def is_busy(self):
+            return self.active
+    service = Service()
+    class Content:
+        done = False
+        async def read(self, _n):
+            self.done = True
+            return json.dumps({"id": identity, "catalog": module.catalog_digest()}).encode()
+        def at_eof(self):
+            return self.done
+    request = SimpleNamespace(scheme="http", host="127.0.0.1:8188", remote="127.0.0.1",
+                              headers={"Authorization": "Bearer correct"}, content_type="application/json",
+                              content=Content())
+    async def run():
+        start, _status, _cancel = module.handlers(SimpleNamespace(accepts=lambda token: token == "correct"), lambda: service)
+        assert start.is_busy() is False
+        assert (await start(request)).status == 200
+        assert start.is_busy() is True
+        service.active = False
+        assert start.is_busy() is False
+    asyncio.run(run())
