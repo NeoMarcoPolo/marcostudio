@@ -53,6 +53,11 @@ def _register_routes():
             pairing = OwnerPairing()
             atexit.register(pairing.close)
             instance.routes.get("/marcostudio/storage")(storage_handler(pairing))
+            from .integrity_routes import handlers as integrity_handlers
+            start, status, cancel = integrity_handlers(pairing)
+            instance.routes.post("/marcostudio/integrity")(start)
+            instance.routes.get("/marcostudio/integrity/{job}")(status)
+            instance.routes.post("/marcostudio/integrity/{job}/cancel")(cancel)
             # The socket path is not a secret; only the owner-local CLI sees the token.
             logging.info("MarcoStudio storage pairing socket: %s", pairing.path)
         except (ImportError, OSError, RuntimeError):
@@ -61,7 +66,8 @@ def _register_routes():
     @instance.routes.get(path)
     async def capabilities(request):
         return web.json_response({"version": 1, "h3_pdd": _h3_pdd_capable(),
-                                  "storage_pairing": 1 if pairing else 0})
+                                  "storage_pairing": 1 if pairing else 0,
+                                  "integrity_verification": 1 if pairing else 0})
 
 
 _register_routes()
