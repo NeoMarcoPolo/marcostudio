@@ -6,15 +6,26 @@ import { catalog, compile, getFeature } from "./catalog";
 import { CONNECTION_KEY, discover, selectConnection } from "./connection";
 import { installTasks, managerAvailable, reconcileInstalls, startDownloads } from "./manager";
 import { checkRequirements } from "./requirements";
-import { allowUnverified, clearUnverified, integrityStates } from "./integrity";
+import { allowUnverified, clearUnverified, failureScope, integrityBusy, integrityStates } from "./integrity";
 import { browserApi } from "./runtime";
 import { getAsset, uploadAsset } from "./assets";
 
 // These tests exercise the surrounding runtime with integrity already verified.
 // Integrity's missing/invalid paths are covered by its dedicated tests.
-vi.mock("./integrity", async original => ({...await original<typeof import("./integrity")>(),
-  integrityStates: vi.fn(async (_address: string, models: {sha256: string}[]) => new Map(models.map(model => [model.sha256, "matched"]))),
-}));
+vi.mock("./integrity", async original => {
+  const actual = await original<typeof import("./integrity")>();
+  return {...actual,
+    integrityStates: vi.fn(async (_address: string, models: {sha256: string}[]) => new Map(models.map(model => [model.sha256, "matched"]))),
+    integrityBusy: vi.fn(actual.integrityBusy),
+    failureScope: vi.fn(actual.failureScope),
+  };
+});
+const actualIntegrity = await vi.importActual<typeof import("./integrity")>("./integrity");
+// The fake serves no MarcoStudio routes; this reports an enabled checksum helper.
+function withChecksumHelper() {
+  vi.mocked(integrityBusy).mockResolvedValue({state: "idle", helper: true});
+  vi.mocked(failureScope).mockResolvedValue("clear");
+}
 
 const blobs = vi.hoisted(() => new Map<string, Blob>());
 vi.mock("./storage", async importOriginal => ({...await importOriginal<typeof import("./storage")>(),
@@ -61,6 +72,8 @@ beforeEach(() => {
   useBrowserRuntime(browserApi);
   blobs.clear(); clearUnverified();
   vi.mocked(integrityStates).mockImplementation(async (_address, models) => new Map(models.map(model => [model.sha256, "matched"])));
+  vi.mocked(integrityBusy).mockImplementation(actualIntegrity.integrityBusy);
+  vi.mocked(failureScope).mockImplementation(actualIntegrity.failureScope);
   managerQueue = "idle";
   missing = false; available = true; manager = false; losePrompt = false; loseDownload = false;
   pending = []; history = {}; taskHistory = {}; batchOperations = []; calls = [];
@@ -193,7 +206,7 @@ describe("direct ComfyUI onboarding", () => {
 
 describe("native generation and installation recovery", () => {
   it("allows an explicitly consented manual install to submit while preserving the unverified warning", async () => {
-    selectConnection(address);
+    selectConnection(address); withChecksumHelper();
     vi.mocked(integrityStates).mockImplementation(async (_address, models) => new Map(models.map(model => [model.sha256, "unverified"])));
     const feature = getFeature("create-image"), mode = feature.defaults.mode;
     const before = await checkRequirements("create-image", mode);
@@ -207,7 +220,7 @@ describe("native generation and installation recovery", () => {
     expect(calls.filter(call => call.path === "/prompt")).toHaveLength(1);
   });
   it("requires explicit session consent for manual models and still blocks active or unknown queues", async () => {
-    selectConnection(address);
+    selectConnection(address); withChecksumHelper();
     vi.mocked(integrityStates).mockImplementation(async (_address, models) => new Map(models.map(model => [model.sha256, "unverified"])));
     const mode = getFeature("create-image").defaults.mode;
     const before = await checkRequirements("create-image", mode);
@@ -245,7 +258,7 @@ describe("native generation and installation recovery", () => {
     expect(calls.filter(call => call.path === "/prompt")).toHaveLength(0);
   });
   it("refuses generation when a verified snapshot changes before submission", async () => {
-    selectConnection(address);
+    selectConnection(address); withChecksumHelper();
     vi.mocked(integrityStates)
       .mockImplementationOnce(async (_address, models) => new Map(models.map(model => [model.sha256, "matched"])))
       .mockImplementationOnce(async (_address, models) => new Map(models.map(model => [model.sha256, "unverified"])));

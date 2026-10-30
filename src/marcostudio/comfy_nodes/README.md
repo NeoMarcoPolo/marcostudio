@@ -63,8 +63,11 @@ The target is not the secret; the command prints the secret, which may remain
 in terminal scrollback. Restarting ComfyUI rotates and removes the old session
 credential. Do not paste the code anywhere except MarcoStudio's pairing field.
 
-If checksum checking is unavailable, MarcoStudio offers an explicit per-session
-choice to continue with model files marked **unverified**. This is not a
+MarcoStudio enforces checksum checks only when this helper reports checksum
+support. Without it, model files found by name count as ready, and setup notes
+that their checksums weren't checked. With checksum support, unchecked files
+block readiness until they match, or until you make an explicit per-session
+choice to continue with them marked **unverified**. This is not a
 checksum result. Known checksum failures, model changes, active checks, and
 active or unknown Manager queue states continue to block task submission.
 The confirmation applies only to the selected ComfyUI connection and the

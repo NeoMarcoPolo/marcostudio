@@ -165,9 +165,16 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
   }
   const present = result.model_requirements.filter(model => model.available);
   const states = await integrityStates(address, present, signal);
-  const requestedFallback = present.some(model => states.get(model.sha256) === "unverified" && allowsUnverified(address, model.sha256));
-  const busy = requestedFallback ? await integrityBusy(address, signal) : {state: "unknown" as const};
-  const scope = requestedFallback && busy.state === "idle" && busy.helper ? await failureScope(address, present, signal) : "clear";
+  const unchecked = present.some(model => states.get(model.sha256) === "unverified");
+  // Checksum checks need the opt-in helper. Without one (including when its
+  // capability can't be read), a matching name is the only evidence available,
+  // so unchecked files are noted instead of blocking readiness.
+  const busy = unchecked ? await integrityBusy(address, signal) : {state: "unknown" as const};
+  const helper = busy.helper === true;
+  const requestedFallback = helper && present.some(model => states.get(model.sha256) === "unverified" && allowsUnverified(address, model.sha256));
+  const scope = requestedFallback && busy.state === "idle" ? await failureScope(address, present, signal) : "clear";
+  if (unchecked && !helper) result.checks.push({name: "integrity-unchecked", status: "warn",
+    message: "Model files were found by name. Their checksums weren't checked because this ComfyUI has no MarcoStudio checksum helper enabled."});
   for (const model of present) {
     const state = states.get(model.sha256);
     if (state === "matched") continue;
@@ -175,6 +182,8 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
       result.checks.push({name: `integrity:${model.key}`, status: "fail", message: state === "blocked"
         ? `${model.filename} failed or changed during verification. Resolve it before continuing.`
         : `${model.filename} is still being verified.`});
+    } else if (!helper) {
+      continue;
     } else if (allowsUnverified(address, model.sha256, busy.instance ?? null) && busy.state === "idle" && scope === "clear") {
       result.checks.push({name: `integrity-unverified:${model.key}`, status: "warn", message: `${model.filename} has not been verified in this session.`});
     } else {
