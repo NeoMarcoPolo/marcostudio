@@ -10,6 +10,41 @@ import type { Requirements } from "./browser/requirements";
 export const enteredKey = () => `marcostudio.entered:${endpoint()}`;
 const formatSize = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
+const downloadTips = [
+  "Relight lets you adjust light direction, brightness, softness and color.",
+  "Remove Background can create a transparent PNG from a photo.",
+  "AI Stylist uses a photo of a person and an outfit reference.",
+  "Product Scene can place a product in a scene described by a prompt or reference.",
+  "Animate Image starts with a first frame and a prompt.",
+];
+
+function DownloadTips() {
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+  useEffect(() => {
+    const query = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!query) return;
+    const update = () => setReducedMotion(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (paused || reducedMotion) return;
+    const timer = window.setInterval(() => {
+      if (!document.hidden) setIndex(previous => (previous + 1) % downloadTips.length);
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [paused, reducedMotion]);
+  return <aside className="download-tip" aria-label="MarcoStudio tips">
+    <div><strong>Did you know?</strong><p>{downloadTips[index]}</p></div>
+    <div className="download-tip-actions">
+      <button type="button" onClick={() => setIndex(previous => (previous + 1) % downloadTips.length)}>Next tip</button>
+      {!reducedMotion && <button type="button" onClick={() => setPaused(value => !value)}>{paused ? "Play tips" : "Pause tips"}</button>}
+    </div>
+  </aside>;
+}
+
 export function DownloadProgress({tasks, active, installing, resume}: {
   tasks: InstallTask[]; active: InstallTask; installing: boolean; resume: () => void;
 }) {
@@ -35,15 +70,16 @@ export function DownloadProgress({tasks, active, installing, resume}: {
   const elapsedText = elapsed === undefined ? "Elapsed time unavailable for this request."
     : `${pending ? "Elapsed since request" : "Time until completion observed"}: ${Math.floor(elapsed / 3600) > 0 ? `${Math.floor(elapsed / 3600)}h ` : ""}${Math.floor(elapsed % 3600 / 60)}m ${elapsed % 60}s`;
   return <section className="install-status" aria-label="Download progress">
-    {batch.length > 0 ? <>
+    <div className="download-progress-summary">{batch.length > 0 ?
       <p>{completed} of {batch.length} tracked files completed{failed > 0 ? ` · ${failed} failed` : ""}</p>
-      <progress max={batch.length} value={completed} aria-label="Files completed"/>
-    </> : <><p>{pending ? "Checking download status" : active.state === "succeeded" ? "Download completed" : "Download failed"}</p>{pending && <progress aria-label="Download status"/>}</>}
+      : <p>{pending ? "Checking download status" : active.state === "succeeded" ? "Download completed" : "Download failed"}</p>}
+      <p>{elapsedText}</p></div>
+    {batch.length > 0 ? <progress max={batch.length} value={completed} aria-label="Files completed"/>
+      : pending && <progress aria-label="Download status"/>}
     {pending && <p>{unfinished.some(task => task.state === "unknown" || task.state === "submitting")
       ? "Waiting for ComfyUI to confirm the request." : "Queued or downloading in ComfyUI."}</p>}
-    <p>{elapsedText}</p>
     {pending && <><p>File percentage and remaining time are not available from ComfyUI Manager.</p>
-      <button disabled={installing} onClick={resume}>Resume downloads</button></>}
+      <button disabled={installing} onClick={resume}>Resume downloads</button><DownloadTips/></>}
   </section>;
 }
 
@@ -189,7 +225,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const selectedDetail = missing.find(model => model.url === view);
   const title = view === "setup" ? ["Connect ComfyUI", `Set up ${name}`, `${name} is ready`][step]
     : view === "connection" ? "ComfyUI address" : view === "requirements" ? "Setup details" : "Model details";
-  return <dialog ref={dialog} className="onboarding" aria-labelledby="onboarding-title" onCancel={event => {event.preventDefault(); close();}}>
+  return <dialog ref={dialog} className={`onboarding${pendingDownloads && !reviewModels && view === "setup" ? " has-download" : ""}`} aria-labelledby="onboarding-title" onCancel={event => {event.preventDefault(); close();}}>
     <div className="onboarding-heading"><h2 ref={heading} tabIndex={-1} id="onboarding-title">{title}</h2><button aria-label="Close setup" onClick={close}><X size={19}/></button></div>
     <ol className="setup-progress" aria-label="Setup progress">
       {["Connect", "Set up", "Ready"].map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined} className={step > index ? "complete" : ""}><span aria-hidden="true">{step > index ? <Check size={12}/> : index + 1}</span>{label}</li>)}
@@ -238,7 +274,9 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
           {manager && toInstall.length > 0 && <button className="setup-primary" disabled={installing || checking || queueBlocked || !chosen.length || confirmed !== selectionKey} onClick={() => void install()}>{installing ? "Starting…" : "Download selected"}</button>}
           <a href={report?.address} target="_blank" rel="noopener noreferrer">Open ComfyUI <ExternalLink size={13}/></a>
         </div>}
-        {!reviewModels && report?.checks.filter(check => check.name === "manager:queue" && check.status === "fail").map(check => <p className="failure-text" role="status" key={check.name}>{check.message}</p>)}
+        {!reviewModels && report?.checks.filter(check => check.name === "manager:queue" && check.status === "fail"
+          && !(pendingDownloads && check.message === "ComfyUI Manager has downloads or other setup tasks in progress. Wait for its queue to finish, then check again."))
+          .map(check => <p className="failure-text" role="status" key={check.name}>{check.message}</p>)}
         {!reviewModels && pendingBatches.length > 1 && <label className="batch-picker">Download batch <select value={batchKey(recentTask!)} onChange={event => setActiveBatch(event.target.value)}>{pendingBatches.map((task, index) => <option key={batchKey(task)} value={batchKey(task)}>Batch {index + 1} · {task.model.filename}</option>)}</select></label>}
         {!reviewModels && recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}
         {pendingDownloads && !reviewModels && missing.length > 0 && <button className="setup-back" onClick={() => setReviewModels(true)}>Review missing models</button>}

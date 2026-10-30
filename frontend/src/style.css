@@ -490,3 +490,11 @@ select option { color: var(--text); background: #242629; }
 .install-status p { margin: 4px 0; }
 .install-status progress { width: 100%; height: 8px; accent-color: #d5ee6f; }
 .install-status button { margin-top: 8px; }
+.download-progress-summary { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 12px; }
+.download-tip { margin-top: 8px; padding-top: 8px; border-top: 1px solid #38383c; }
+.download-tip strong { font-size: 0.85rem; }
+.download-tip p { margin: 3px 0 0; }
+.download-tip-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.onboarding.has-download .setup-progress { margin: 14px 0; }
+.onboarding.has-download .setup-panel { margin-bottom: 12px; }
+.onboarding.has-download footer { padding-top: 8px; }

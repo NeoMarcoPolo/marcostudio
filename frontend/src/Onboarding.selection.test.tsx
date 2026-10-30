@@ -85,4 +85,16 @@ describe("model download consent", () => {
     expect(screen.getByRole("combobox", {name: "Download batch"})).toHaveValue("batch:b");
     expect(manager.start).not.toHaveBeenCalled();
   });
+  it("avoids a duplicate active-queue warning during a tracked download but retains an unknown-queue warning", async () => {
+    const pending = {id: "pending", model: models[0], state: "queued", batchId: "a", submittedAt: Date.now()};
+    manager.tasks.mockReturnValue([pending]);
+    const active = "ComfyUI Manager has downloads or other setup tasks in progress. Wait for its queue to finish, then check again.";
+    const unknown = "Couldn't check the ComfyUI Manager queue. Check the connection and try again.";
+    const initial = props(report(models, [{name: "manager:queue", status: "fail", message: active}]));
+    const view = render(<Onboarding {...initial}/>);
+    await waitFor(() => expect(screen.getByRole("region", {name: "Download progress"})).toBeInTheDocument());
+    expect(screen.queryByText(active)).not.toBeInTheDocument();
+    view.rerender(<Onboarding {...initial} doctor={report(models, [{name: "manager:queue", status: "fail", message: unknown}])}/>);
+    expect(screen.getByText(unknown)).toBeInTheDocument();
+  });
 });
