@@ -33,7 +33,7 @@ function ControlHelp({ label, text, example }: { label: string; text: string; ex
   const [hovered, setHovered] = useState(false);
   const id = useId();
   const visible = open || hovered;
-  return <div className="relight-help" onPointerEnter={event => { if (event.pointerType === "mouse") setHovered(true); }}
+  return <div className={visible ? "relight-help open" : "relight-help"} onPointerEnter={event => { if (event.pointerType === "mouse") setHovered(true); }}
     onPointerLeave={event => { if (event.pointerType === "mouse") setHovered(false); }}
     onKeyDown={event => { if (event.key === "Escape") { setOpen(false); setHovered(false); } }}>
     <button type="button" className="relight-help-trigger" aria-label={`About ${label}`} aria-expanded={open} aria-describedby={visible ? id : undefined} onClick={() => setOpen(value => !value)}>?</button>

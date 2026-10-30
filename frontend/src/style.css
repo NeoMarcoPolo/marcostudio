@@ -513,9 +513,11 @@ select option { color: var(--text); background: #242629; }
 .relight-heading h3 { margin: 0; }
 .relight-help-line { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font-size: 11px; }
 .relight-help { position: relative; display: inline-flex; z-index: 3; }
+/* Each wrapper is its own stacking context; lift the open one above later triggers. */
+.relight-help.open { z-index: 4; }
 .relight-help-trigger { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid #686b69; border-radius: 50%; background: transparent; color: #c7cbc5; font-size: 11px; cursor: pointer; }
 .relight-help-trigger:focus-visible { outline: 2px solid #d5ee6f; outline-offset: 2px; }
-.relight-help-card { position: absolute; z-index: 10; top: calc(100% + 8px); left: -80px; width: min(245px, 70vw); padding: 10px; border: 1px solid #50544d; border-radius: 10px; background: #252927; color: #f4f5ef; box-shadow: 0 8px 24px #0008; font-size: 12px; line-height: 1.4; }
+.relight-help-card { position: absolute; z-index: 10; top: calc(100% + 8px); left: -29px; width: min(245px, 70vw); padding: 10px; border: 1px solid #50544d; border-radius: 10px; background: #252927; color: #f4f5ef; box-shadow: 0 8px 24px #0008; font-size: 12px; line-height: 1.4; }
 .color-row .relight-help-card, .seed-row .relight-help-card { top: auto; bottom: calc(100% + 8px); }
 .relight-help-card p { margin: 8px 0 0; }
 .relight-help-example { height: 35px; position: relative; overflow: hidden; border-radius: 6px; background: #161a18; }
