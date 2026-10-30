@@ -1,4 +1,3 @@
-import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { catalog } from "./catalog";
 import { selectConnection } from "./connection";
@@ -15,7 +14,6 @@ beforeEach(() => {
 afterEach(() => { clearUnverified(); unpairIntegrity(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("requires a paired verification and rechecks each snapshot before allowing it", async () => {
-  vi.stubGlobal("crypto", webcrypto);
   let state = "checksum_matched";
   const requests: {url: string; init?: RequestInit}[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -70,7 +68,6 @@ it("rejects fallback when helper work is active or capability is unknown", async
 });
 
 it("keeps a known checksum failure blocked after unpairing", async () => {
-  vi.stubGlobal("crypto", webcrypto);
   const otherModel = catalog[0].models.flash[3];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).endsWith("/integrity") ? {state: "accepted", job} : {state: "hash_mismatch"}), {status: 200})));
   pairIntegrity(address, "owner-secret");
@@ -118,7 +115,6 @@ it("invalidates consent when the connection or helper instance changes", async (
 });
 
 it("requires pairing and blocks the selected model when another tab recorded a failure", async () => {
-  vi.stubGlobal("crypto", webcrypto);
   const other = catalog[0].models.flash[1];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: [other.sha256]} : {version: 1, integrity_verification: 1, integrity_busy: false, integrity_failure_lookup: 1, integrity_instance: "instance_a"}), {status: 200})));
   await expect(allowUnverified(address, [other])).rejects.toThrow(/Pair the helper/);
@@ -128,7 +124,6 @@ it("requires pairing and blocks the selected model when another tab recorded a f
 });
 
 it("allows a paired user to continue for models disjoint from another failure", async () => {
-  vi.stubGlobal("crypto", webcrypto);
   const failedModel = catalog[0].models.flash[1], other = catalog[0].models.flash[4];
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     const path = String(url);
@@ -142,7 +137,6 @@ it("allows a paired user to continue for models disjoint from another failure", 
 });
 
 it("uses independent persisted keys for distinct model failures", async () => {
-  vi.stubGlobal("crypto", webcrypto);
   const first = catalog[0].models.flash[1], second = catalog[0].models.flash[2];
   const writes = vi.spyOn(localStorage, "setItem");
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: []} : String(url).endsWith("/integrity") ? {state: "accepted", job} : {state: "hash_mismatch"}), {status: 200})));
@@ -153,7 +147,6 @@ it("uses independent persisted keys for distinct model failures", async () => {
 });
 
 it("lets an authenticated helper failure override an earlier matching job", async () => {
-  vi.stubGlobal("crypto", webcrypto);
   const other = catalog[0].models.flash[0];
   let failed = false;
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
@@ -185,7 +178,6 @@ it("does not restore stale consent after a deferred A→B→A connection change"
 
 
 it("does not let a deferred A failure lookup unpair a newer B connection", async () => {
-  vi.stubGlobal("crypto", webcrypto);
   const firstModel = {...model, sha256: "e".repeat(64)};
   const otherAddress = "http://127.0.0.1:8197";
   let release!: (response: Response) => void;

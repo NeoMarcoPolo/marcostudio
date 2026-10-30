@@ -85,6 +85,12 @@ def test_authentication_catalog_and_status():
 
 def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
     import hashlib
+    import os
+
+    # Windows checksum support is experimental and off by default. This test
+    # exercises the explicit opt-in, as the separate Windows tests do.
+    if os.name == "nt":
+        monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM", "1")
 
     content = b"small synthetic model fixture"
     path = tmp_path / "model.bin"
