@@ -98,7 +98,11 @@ def manager_default_space(filename: str, model_type: str) -> StorageSpace:
     try:
         from comfyui_manager.glob.constants import model_dir_name_map
         from comfyui_manager.glob.utils.model_utils import get_model_dir
-
+    except (ImportError, SystemExit):
+        # Some Manager versions terminate when their standalone environment is
+        # incomplete; this optional probe must not terminate the host process.
+        return StorageSpace("unavailable")
+    try:
         if model_type.lower() not in model_dir_name_map:
             return StorageSpace("unavailable")
         data = {"filename": filename, "type": model_type, "save_path": "default"}

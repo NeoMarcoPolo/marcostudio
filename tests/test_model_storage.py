@@ -178,3 +178,17 @@ def test_manager_default_space_rejects_mapping_change_and_resolution_failure(tmp
         raise KeyError("private path")
     resolver.get_model_dir = fail
     assert storage.manager_default_space("model", "checkpoint") == storage.StorageSpace("unavailable")
+
+
+def test_manager_import_exit_does_not_terminate_process(monkeypatch):
+    import builtins
+
+    original_import = builtins.__import__
+
+    def import_with_manager_exit(name, *args, **kwargs):
+        if name == "comfyui_manager.glob.constants":
+            raise SystemExit(255)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_with_manager_exit)
+    assert storage.manager_default_space("model.safetensors", "checkpoint") == storage.StorageSpace("unavailable")
