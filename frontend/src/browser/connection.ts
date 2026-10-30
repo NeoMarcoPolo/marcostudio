@@ -2,6 +2,11 @@ import { ServiceError } from "../api";
 
 export const CONNECTION_KEY = "marcostudio.connection.v1";
 export const CONNECTION_DRAFT_KEY = "marcostudio.connection.draft.v1";
+let connectionGeneration = 0;
+export const currentConnectionGeneration = () => connectionGeneration;
+if (typeof window !== "undefined") window.addEventListener("storage", event => {
+  if (event.key === CONNECTION_KEY) connectionGeneration++;
+});
 export const endpoint = () => localStorage.getItem(CONNECTION_KEY) || "";
 export function normalizeAddress(address: string) {
   const url = new URL(address.includes("://") ? address : `http://${address}`);
@@ -57,6 +62,7 @@ export async function discover(address?: string) {
 }
 
 export function selectConnection(address: string) {
+  connectionGeneration++;
   localStorage.setItem(CONNECTION_KEY, normalizeAddress(address));
   localStorage.removeItem(CONNECTION_DRAFT_KEY);
 }

@@ -74,7 +74,6 @@ def test_authentication_catalog_and_status():
                 assert response.status == 401
             async with client.get(failure_url, headers=auth) as response:
                 assert await response.json() == {"failed": [identity]}
-            assert start.has_failure() is True
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
                 assert await response.json() == {"state": "checksum_matched", "checked_at": "2026-10-30T18:00:00+00:00"}
             async with client.post(server.make_url("/cancel/" + job), headers=auth) as response:
@@ -133,7 +132,7 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
             path.write_bytes(b"modified fixture")
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
                 assert (await response.json())["state"] == "changed"
-            assert start.has_failure() is True
+            assert service.has_failure() is True
             query = "/failures?ids=" + identity + "&catalog=" + module.catalog_digest()
             async with client.get(server.make_url(query), headers=auth) as response:
                 assert await response.json() == {"failed": [identity]}

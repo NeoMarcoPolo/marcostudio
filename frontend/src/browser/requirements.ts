@@ -2,7 +2,7 @@ import type { Doctor, FeatureId } from "../api";
 import { getFeature, resolveTemplate, type Graph, type Model } from "./catalog";
 import { endpoint, probe, request } from "./connection";
 import { installTasks, reconcileInstalls, saveInstallTasks } from "./manager";
-import { allowsUnverified, integrityBusy, integrityStates } from "./integrity";
+import { allowsUnverified, clearUnverified, failureScope, integrityBusy, integrityStates } from "./integrity";
 
 type Spec = [unknown, Record<string, unknown>?];
 type Definition = {input?: {required?: Record<string, Spec>; optional?: Record<string, Spec>}};
@@ -141,6 +141,7 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
     }
   }
   const queue = await checkManagerQueue(address, signal);
+  if (queue === "active" || queue === "unknown") clearUnverified();
   if (queue === "active") result.checks.push({name: "manager:queue", status: "fail",
     message: "ComfyUI Manager has downloads or other setup tasks in progress. Wait for its queue to finish, then check again."});
   if (queue === "unknown") result.checks.push({name: "manager:queue", status: "fail",
@@ -166,6 +167,7 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
   const states = await integrityStates(address, present, signal);
   const requestedFallback = present.some(model => states.get(model.sha256) === "unverified" && allowsUnverified(address, model.sha256));
   const busy = requestedFallback ? await integrityBusy(address, signal) : {state: "unknown" as const};
+  const scope = requestedFallback && busy.state === "idle" && busy.helper ? await failureScope(address, present, signal) : "clear";
   for (const model of present) {
     const state = states.get(model.sha256);
     if (state === "matched") continue;
@@ -173,7 +175,7 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
       result.checks.push({name: `integrity:${model.key}`, status: "fail", message: state === "blocked"
         ? `${model.filename} failed or changed during verification. Resolve it before continuing.`
         : `${model.filename} is still being verified.`});
-    } else if (allowsUnverified(address, model.sha256, busy.instance ?? null) && busy.state === "idle") {
+    } else if (allowsUnverified(address, model.sha256, busy.instance ?? null) && busy.state === "idle" && scope === "clear") {
       result.checks.push({name: `integrity-unverified:${model.key}`, status: "warn", message: `${model.filename} has not been verified in this session.`});
     } else {
       result.checks.push({name: `integrity:${model.key}`, status: "fail", message: `${model.filename} was found but its checksum has not matched during a check in this session.`});

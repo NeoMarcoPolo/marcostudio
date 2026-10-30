@@ -164,10 +164,6 @@ def handlers(pairing, service_factory=None):
     def is_busy():
         return admission.locked() or bool(service is not None and service.is_busy())
 
-    def has_failure():
-        return bool(service is not None and service.has_failure())
-
     start.failures = failures
-    start.has_failure = has_failure
     start.is_busy = is_busy
     return start, status, cancel

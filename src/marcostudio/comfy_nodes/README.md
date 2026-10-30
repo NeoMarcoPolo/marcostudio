@@ -70,6 +70,7 @@ active or unknown Manager queue states continue to block task submission.
 The confirmation applies only to the selected ComfyUI connection and the
 specific models acknowledged, and does not survive reloading the page. Where
 the helper exposes an instance identity, a changed instance invalidates the
-confirmation. A helper reports known failures per model to paired clients and
-only a generic failure signal to other clients. Queue and busy observations
+confirmation. A helper reports known failures per model only to paired clients. When an
+integrity-capable helper is present, pair it before choosing to use unverified
+models so MarcoStudio can check failures for the selected models. Queue and busy observations
 are point-in-time checks; they are not locks on later ComfyUI activity.

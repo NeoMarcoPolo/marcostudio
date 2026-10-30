@@ -1,5 +1,5 @@
 import { catalog, type Model } from "./catalog";
-import { request } from "./connection";
+import { currentConnectionGeneration, endpoint, request } from "./connection";
 import { canPairStorage } from "./modelSpace";
 
 type Pair = {address: string; token: string};
@@ -8,7 +8,8 @@ type Job = {id: string; active: boolean};
 const BAD_PREFIX = "marcostudio.integrity.failure.v2:";
 let persistenceUnsafe = false;
 let paired: Pair | undefined;
-let allowed: {address: string; ids: Set<string>; instance?: string} | undefined;
+let allowed: {address: string; ids: Set<string>; instance?: string; connection: number} | undefined;
+let consentGeneration = 0;
 let observedAddress: string | undefined;
 let observedInstance: {address: string; instance?: string} | undefined;
 const jobs = new Map<string, Job>();
@@ -57,9 +58,9 @@ export function unpairIntegrity() {
   // Retain only outstanding jobs to avoid silently bypassing active work.
   for (const [key, job] of jobs) if (!job.active) jobs.delete(key);
 }
-export function clearUnverified() { allowed = undefined; }
+export function clearUnverified() { allowed = undefined; observedInstance = undefined; consentGeneration++; }
 export function allowsUnverified(address: string, id: string, instance?: string | null): boolean {
-  return allowed?.address === address && allowed.ids.has(id) && !isBad(address, id)
+  return allowed?.address === address && allowed.connection === currentConnectionGeneration() && allowed.ids.has(id) && !isBad(address, id)
     && (instance === undefined || allowed.instance === (instance ?? undefined));
 }
 
@@ -92,32 +93,34 @@ async function status(address: string, token: string, job: string, signal?: Abor
   return {state: result.state, checkedAt: result.checked_at};
 }
 
+async function remoteFailureSet(address: string, models: Model[], signal?: AbortSignal): Promise<Set<string> | null> {
+  const pair = currentIntegrityPair(address);
+  if (!pair || !models.length) return null;
+  try {
+    const ids = [...new Set(models.map(model => model.sha256))];
+    const query = new URLSearchParams({ids: ids.join(","), catalog: await digestCatalog()});
+    const result = await request<{failed?: unknown}>(address, `/marcostudio/integrity-failures?${query}`, {headers: {Authorization: `Bearer ${pair.token}`}, signal});
+    if (!Array.isArray(result?.failed) || result.failed.some(id => typeof id !== "string" || !ids.includes(id)) || currentIntegrityPair(address)?.token !== pair.token) return null;
+    const failed = new Set(result.failed as string[]);
+    for (const id of failed) rememberBad(address, id, "changed");
+    return failed;
+  } catch (error) { if (signal?.aborted) throw error; console.warn("Could not check model failure history."); return null; }
+}
 export async function integrityStates(address: string, models: Model[], signal?: AbortSignal): Promise<Map<string, CheckState>> {
   const states = new Map<string, CheckState>();
   const pair = currentIntegrityPair(address);
-  const remoteFailures = new Set<string>();
-  let failureStateKnown = !pair;
-  if (pair && models.length) {
-    try {
-      const ids = [...new Set(models.map(model => model.sha256))];
-      const query = new URLSearchParams({ids: ids.join(","), catalog: await digestCatalog()});
-      const result = await request<{failed?: unknown}>(address, `/marcostudio/integrity-failures?${query}`, {headers: {Authorization: `Bearer ${pair.token}`}, signal});
-      if (!Array.isArray(result?.failed) || result.failed.some(id => typeof id !== "string" || !ids.includes(id))) throw new Error("Invalid verification failure response.");
-      for (const id of result.failed as string[]) { remoteFailures.add(id); rememberBad(address, id, "changed"); }
-      failureStateKnown = true;
-    } catch (error) { if (signal?.aborted) throw error; }
-  }
+  const remoteFailures = pair && models.length ? await remoteFailureSet(address, models, signal) : null;
   await Promise.all(models.map(async model => {
     const key = keyFor(address, model.sha256), job = jobs.get(key);
     let state: CheckState = isBad(address, model.sha256) ? "blocked" : job?.active ? "active" : "unverified";
-    if (job && pair && failureStateKnown && !remoteFailures.has(model.sha256)) {
+    if (job && pair && remoteFailures && !remoteFailures.has(model.sha256)) {
       try {
         const result = await status(address, pair.token, job.id, signal);
         if (result.state === "checksum_matched") { job.active = false; clearBad(address, model.sha256); state = isBad(address, model.sha256) ? "blocked" : "matched"; }
         else if (badStates.has(result.state)) { job.active = false; rememberBad(address, model.sha256, result.state); state = "blocked"; }
         else if (result.state === "queued" || result.state === "running") { job.active = true; state = "active"; }
         else { job.active = false; state = isBad(address, model.sha256) ? "blocked" : "unverified"; }
-      } catch (error) { if (signal?.aborted) throw error; }
+      } catch (error) { if (signal?.aborted) throw error; console.warn("Could not check model verification status."); }
     }
     states.set(model.sha256, state);
   }));
@@ -135,26 +138,36 @@ function noteInstance(address: string, instance?: string) {
 
 // A helper without integrity support cannot run an integrity job. Unknown
 // capability state is not assumed idle; a 404 denotes the manual-only case.
-export async function integrityBusy(address: string, signal?: AbortSignal): Promise<{state: "idle" | "active" | "blocked" | "unknown"; instance?: string}> {
+export async function integrityBusy(address: string, signal?: AbortSignal): Promise<{state: "idle" | "active" | "unknown"; instance?: string; helper?: boolean}> {
   try {
     const response = await fetch(`${address}/marcostudio/capabilities`, {credentials: "omit", cache: "no-store", redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000)});
-    if (response.status === 404) { noteInstance(address); return {state: "idle"}; }
-    if (!response.ok) return {state: "unknown"};
+    if (response.status === 404) { noteInstance(address); return {state: "idle", helper: false}; }
+    if (!response.ok) { clearUnverified(); return {state: "unknown"}; }
     const value = await response.json();
-    if (value?.version !== 1) return {state: "unknown"};
+    if (value?.version !== 1) { clearUnverified(); return {state: "unknown"}; }
     const instance = typeof value.integrity_instance === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value.integrity_instance) ? value.integrity_instance : undefined;
     noteInstance(address, instance);
-    if (value.integrity_verification !== 1) return {state: "idle", instance};
-    if (typeof value.integrity_busy !== "boolean" || typeof value.integrity_problem !== "boolean" || !instance) return {state: "unknown"};
-    return {state: value.integrity_busy ? "active" : value.integrity_problem ? "blocked" : "idle", instance};
-  } catch (error) { if (signal?.aborted) throw error; return {state: "unknown"}; }
+    if (value.integrity_verification !== 1) return {state: "idle", instance, helper: false};
+    if (typeof value.integrity_busy !== "boolean" || value.integrity_failure_lookup !== 1 || !instance) { clearUnverified(); return {state: "unknown"}; }
+    if (value.integrity_busy) clearUnverified();
+    return {state: value.integrity_busy ? "active" : "idle", instance, helper: true};
+  } catch (error) { clearUnverified(); if (signal?.aborted) throw error; return {state: "unknown"}; }
+}
+export async function failureScope(address: string, models: Model[], signal?: AbortSignal): Promise<"clear" | "failed" | "unknown"> {
+  const failures = await remoteFailureSet(address, models, signal);
+  return failures === null ? "unknown" : failures.size ? "failed" : "clear";
 }
 export async function allowUnverified(address: string, models: Model[]) {
+  currentIntegrityPair(address);
+  const generation = consentGeneration, connection = currentConnectionGeneration();
+  if (endpoint() !== address) throw new Error("The ComfyUI connection changed. Review setup again.");
   const capability = await integrityBusy(address);
-  if (!models.length || capability.state !== "idle") throw new Error("Wait for model verification to finish or resolve a failed verification before continuing.");
+  if (!models.length || capability.state !== "idle") throw new Error("Wait for model verification to finish or restore the ComfyUI connection.");
   const states = await integrityStates(address, models);
   if ([...states.values()].some(state => state === "blocked" || state === "active")) throw new Error("A model has a failed or active verification. Resolve it before continuing.");
-  allowed = {address, instance: capability.instance, ids: new Set(models.filter(model => states.get(model.sha256) === "unverified").map(model => model.sha256))};
+  if (capability.helper && await failureScope(address, models) !== "clear") throw new Error("Pair the helper to check selected model failures before continuing.");
+  if (generation !== consentGeneration || connection !== currentConnectionGeneration() || endpoint() !== address) throw new Error("The ComfyUI connection or pairing changed. Review setup again.");
+  allowed = {address, instance: capability.instance, connection, ids: new Set(models.filter(model => states.get(model.sha256) === "unverified").map(model => model.sha256))};
 }
 
 export async function verifyModelSnapshots(address: string, models: Model[], progress: (message: string) => void, signal?: AbortSignal) {

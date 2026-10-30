@@ -6,7 +6,7 @@ import type { Doctor } from "./api";
 import { clearUnverified, unpairIntegrity } from "./browser/integrity";
 const calls = vi.hoisted(() => ({check: vi.fn(), start: vi.fn(), supports: vi.fn(), integrity: vi.fn(), address: "http://127.0.0.1:8192"}));
 vi.mock("./browser/manager", () => ({canInstall: () => true, installTasks: () => [], managerAvailable: async () => true, reconcileInstalls: async () => [], resumeDownloads: vi.fn(), startDownloads: calls.start}));
-vi.mock("./browser/connection", () => ({CONNECTION_DRAFT_KEY: "draft", endpoint: () => calls.address, discover: vi.fn(), normalizeAddress: (v: string) => v, selectConnection: vi.fn()}));
+vi.mock("./browser/connection", () => ({CONNECTION_DRAFT_KEY: "draft", currentConnectionGeneration: () => 0, endpoint: () => calls.address, discover: vi.fn(), normalizeAddress: (v: string) => v, selectConnection: vi.fn()}));
 vi.mock("./browser/modelSpace", async original => ({...await original<typeof import("./browser/modelSpace")>(), checkStorage: calls.check, supportsStoragePairing: calls.supports, supportsIntegrityVerification: calls.integrity}));
 const id = "a".repeat(64);
 const model = {key: "first", filename: "first.safetensors", category: "vae", url: "https://example.com/first", size: 2e9, sha256: id, repository: "a/b", loader: "", field: "", available: false, installable: true};

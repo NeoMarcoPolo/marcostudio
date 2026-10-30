@@ -226,7 +226,8 @@ describe("native generation and installation recovery", () => {
     expect(active.checks.find(check => check.name === "manager:queue")?.status).toBe("fail");
     managerQueue = "unknown";
     expect((await checkRequirements("create-image", mode)).ready).toBe(false);
-    clearUnverified(); manager = false;
+    manager = false;
+    // Observed queue activity invalidates the prior fallback consent.
     expect((await checkRequirements("create-image", mode)).ready).toBe(false);
   });
   it("stores normalized uploads before sending them to ComfyUI and restores their metadata", async () => {

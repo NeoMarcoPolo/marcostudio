@@ -27,9 +27,9 @@ export async function supportsStoragePairing(address: string): Promise<boolean> 
 export async function supportsIntegrityVerification(address: string): Promise<boolean> {
   if (!canPairStorage(address)) return false;
   try {
-    const capability = await request<{version: number; integrity_verification?: number; integrity_busy?: boolean; integrity_problem?: boolean; integrity_instance?: string}>(address, "/marcostudio/capabilities");
+    const capability = await request<{version: number; integrity_verification?: number; integrity_busy?: boolean; integrity_failure_lookup?: number; integrity_instance?: string}>(address, "/marcostudio/capabilities");
     return capability?.version === 1 && capability.integrity_verification === 1
-      && typeof capability.integrity_busy === "boolean" && typeof capability.integrity_problem === "boolean"
+      && typeof capability.integrity_busy === "boolean" && capability.integrity_failure_lookup === 1
       && typeof capability.integrity_instance === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(capability.integrity_instance);
   } catch { return false; }
 }

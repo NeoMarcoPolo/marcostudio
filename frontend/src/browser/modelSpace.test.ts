@@ -18,7 +18,7 @@ describe("model destination space", () => {
   it("treats an outdated integrity helper as unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({version: 1, integrity_verification: 1}), {status: 200})));
     expect(await supportsIntegrityVerification("http://127.0.0.1:8188")).toBe(false);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({version: 1, integrity_verification: 1, integrity_busy: false, integrity_problem: false, integrity_instance: "instance"}), {status: 200})));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({version: 1, integrity_verification: 1, integrity_busy: false, integrity_failure_lookup: 1, integrity_instance: "instance"}), {status: 200})));
     expect(await supportsIntegrityVerification("http://127.0.0.1:8188")).toBe(true);
   });
   it("uses bearer authorization, refuses redirects, and validates IDs", async () => {

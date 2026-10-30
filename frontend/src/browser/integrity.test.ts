@@ -1,13 +1,14 @@
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { catalog } from "./catalog";
+import { selectConnection } from "./connection";
 import { allowUnverified, allowsUnverified, clearUnverified, currentIntegrityPair, integrityBusy, pairIntegrity, unpairIntegrity, verifiedSnapshots, verifyModelSnapshots } from "./integrity";
 
 const address = "http://127.0.0.1:8196";
 const model = catalog[0].models.flash[0];
 const job = "a".repeat(24);
 beforeEach(() => {
-  const values = new Map<string, string>();
+  const values = new Map<string, string>([["marcostudio.connection.v1", address]]);
   vi.stubGlobal("localStorage", {getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key)});
   clearUnverified(); unpairIntegrity();
 });
@@ -41,6 +42,11 @@ it("refuses a pairing code over non-loopback plain HTTP", () => {
 it("allows unverified use only after explicit consent for this address and models", async () => {
   const otherModel = catalog[0].models.flash[1];
   vi.stubGlobal("fetch", vi.fn(async () => new Response(null, {status: 404})));
+  expect(allowsUnverified(address, otherModel.sha256)).toBe(false);
+  await allowUnverified(address, [otherModel]);
+  expect(allowsUnverified(address, otherModel.sha256)).toBe(true);
+  selectConnection("http://127.0.0.1:8197");
+  selectConnection(address);
   expect(allowsUnverified(address, otherModel.sha256)).toBe(false);
   await allowUnverified(address, [otherModel]);
   expect(allowsUnverified(address, otherModel.sha256)).toBe(true);
@@ -92,7 +98,7 @@ it("keeps a pair across modal lifetimes and clears it on unpair or address chang
 it("invalidates consent when the connection or helper instance changes", async () => {
   const other = catalog[0].models.flash[4];
   let instance = "instance_a";
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({version: 1, integrity_verification: 1, integrity_busy: false, integrity_problem: false, integrity_instance: instance}), {status: 200})));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({version: 1, integrity_verification: 0, integrity_busy: false, integrity_instance: instance}), {status: 200})));
   await allowUnverified(address, [other]);
   expect(allowsUnverified(address, other.sha256)).toBe(true);
   instance = "instance_b";
@@ -107,11 +113,28 @@ it("invalidates consent when the connection or helper instance changes", async (
   expect(allowsUnverified(address, other.sha256)).toBe(false);
 });
 
-it("blocks another tab when the helper recorded an unpolled checksum failure", async () => {
+it("requires pairing and blocks the selected model when another tab recorded a failure", async () => {
+  vi.stubGlobal("crypto", webcrypto);
   const other = catalog[0].models.flash[1];
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({version: 1, integrity_verification: 1, integrity_busy: false, integrity_problem: true, integrity_instance: "instance_a"}), {status: 200})));
-  await expect(allowUnverified(address, [other])).rejects.toThrow(/resolve a failed verification/);
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: [other.sha256]} : {version: 1, integrity_verification: 1, integrity_busy: false, integrity_failure_lookup: 1, integrity_instance: "instance_a"}), {status: 200})));
+  await expect(allowUnverified(address, [other])).rejects.toThrow(/Pair the helper/);
+  pairIntegrity(address, "owner-secret");
+  await expect(allowUnverified(address, [other])).rejects.toThrow(/failed or active/);
   expect(allowsUnverified(address, other.sha256)).toBe(false);
+});
+
+it("allows a paired user to continue for models disjoint from another failure", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const failedModel = catalog[0].models.flash[1], other = catalog[0].models.flash[4];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const path = String(url);
+    const body = path.includes("/integrity-failures?") ? {failed: path.includes(failedModel.sha256) ? [failedModel.sha256] : []}
+      : {version: 1, integrity_verification: 1, integrity_busy: false, integrity_failure_lookup: 1, integrity_instance: "instance_a"};
+    return new Response(JSON.stringify(body), {status: 200});
+  }));
+  pairIntegrity(address, "owner-secret");
+  await allowUnverified(address, [other]);
+  expect(allowsUnverified(address, other.sha256)).toBe(true);
 });
 
 it("uses independent persisted keys for distinct model failures", async () => {
@@ -141,4 +164,17 @@ it("lets an authenticated helper failure override an earlier matching job", asyn
   expect((await verifiedSnapshots(address, [other])).has(other.sha256)).toBe(true);
   failed = true;
   expect((await verifiedSnapshots(address, [other])).size).toBe(0);
+});
+
+
+it("does not restore stale consent after a deferred A→B→A connection change", async () => {
+  const other = {...catalog[0].models.flash[2], sha256: "d".repeat(64)};
+  let release!: (response: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => {release = resolve;})));
+  const pending = allowUnverified(address, [other]);
+  selectConnection("http://127.0.0.1:8197");
+  selectConnection(address);
+  release(new Response(null, {status: 404}));
+  await expect(pending).rejects.toThrow(/connection or pairing changed/);
+  expect(allowsUnverified(address, other.sha256)).toBe(false);
 });
