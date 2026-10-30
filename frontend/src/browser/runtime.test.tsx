@@ -167,7 +167,9 @@ describe("direct ComfyUI onboarding", () => {
     expect(localStorage.getItem(CONNECTION_KEY)).toBeNull();
     view.unmount(); render(<App/>);
     dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", {name: "Change address"}));
     expect(within(dialog).getByLabelText("ComfyUI address")).toHaveValue("http://127.0.0.1:9194");
+    fireEvent.click(within(dialog).getByRole("button", {name: /Back to setup/}));
     available = true;
     await act(async () => { window.dispatchEvent(new Event("focus")); });
     await within(dialog).findByText("ComfyUI connected");
@@ -229,7 +231,7 @@ describe("native generation and installation recovery", () => {
     await startDownloads([model]);
     expect(calls.filter(call => call.path.endsWith("install_model"))).toHaveLength(1);
     taskHistory[task.id] = {ui_id: task.id, result: "Disk full", status: {status_str: "failed", completed: true, messages: ["Disk full"]}};
-    expect((await reconcileInstalls())[0].error).toBe("Disk full");
+    expect((await reconcileInstalls())[0].error).toContain("ComfyUI reports: Disk full.");
     loseDownload = false;
     await startDownloads([model]);
     const submissions = calls.filter(call => call.path.endsWith("install_model"));

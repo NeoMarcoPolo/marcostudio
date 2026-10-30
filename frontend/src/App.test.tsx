@@ -227,7 +227,7 @@ describe("image and video tools", () => {
     const player = await screen.findByLabelText("Result: waves.mp4");
     expect(player.tagName).toBe("VIDEO");
     expect(screen.getByLabelText("Prompt")).toHaveValue("Moving waves");
-    expect(screen.getByRole("link", {name: /Download/})).toHaveAttribute("download", "waves.mp4");
+    expect(screen.getByRole("link", {name: "Download"})).toHaveAttribute("download", "waves.mp4");
     expect(calls.some(c => c.url.includes("null/meta"))).toBe(false);
   });
   it("opens retired Flash keyframes in Standard without changing the recorded job", async () => {
@@ -564,7 +564,7 @@ describe("Relight studio", () => {
     expect(screen.getByAltText("Result: relit.png")).toHaveStyle({
       clipPath: "inset(0 0 0 72%)",
     });
-    expect(screen.getByRole("link", { name: /Download/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
       "download",
       "relit.png",
     );

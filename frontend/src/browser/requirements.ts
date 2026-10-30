@@ -13,6 +13,30 @@ export interface Requirements extends Doctor {
   models: Record<string, string>;
 }
 
+// The loader lists a filename as soon as Manager creates it, before download
+// completion. Query the whole Manager queue, not the current browser's client
+// ID: another browser may have started the download. A 404 is the supported
+// manual-install case; other failures do not prove the queue is idle.
+async function checkManagerQueue(address: string, signal?: AbortSignal): Promise<"idle" | "active" | "unsupported" | "unknown"> {
+  try {
+    const timeout = AbortSignal.timeout(15000);
+    const response = await fetch(`${address}/v2/manager/queue/status`, {
+      credentials: "omit", cache: "no-store", redirect: "error",
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    if (response.status === 404) return "unsupported";
+    if (!response.ok) return "unknown";
+    const status = await response.json();
+    if (!Number.isInteger(status?.pending_count) || status.pending_count < 0
+      || !Number.isInteger(status?.in_progress_count) || status.in_progress_count < 0
+      || typeof status?.is_processing !== "boolean") return "unknown";
+    return status.pending_count > 0 || status.in_progress_count > 0 || status.is_processing ? "active" : "idle";
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return "unknown";
+  }
+}
+
 function validateNode(node: Graph[string], definition: Definition, models: Model[]) {
   const fields = {...definition.input?.required, ...definition.input?.optional};
   const required = new Set(Object.keys(definition.input?.required ?? {}));
@@ -115,6 +139,11 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
       result.checks.push({name: "h3_pdd", status: "fail", message: "Update ComfyUI and MarcoStudio nodes for FastH3 support."});
     }
   }
+  const queue = await checkManagerQueue(address, signal);
+  if (queue === "active") result.checks.push({name: "manager:queue", status: "fail",
+    message: "ComfyUI Manager has downloads or other setup tasks in progress. Wait for its queue to finish, then check again."});
+  if (queue === "unknown") result.checks.push({name: "manager:queue", status: "fail",
+    message: "Couldn't check the ComfyUI Manager queue. Check the connection and try again."});
   let tasks = installTasks(address).filter(task => selected.some(model => model.url === task.model.url));
   if (tasks.some(task => !["succeeded", "failed"].includes(task.state))) {
     try { tasks = (await reconcileInstalls(address)).filter(task => selected.some(model => model.url === task.model.url)); }

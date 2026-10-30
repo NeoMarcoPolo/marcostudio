@@ -30,6 +30,7 @@ import { draftAssets, savedDraft, saveDraft } from "./browser/draft";
 import { InputAssets, SourceInput, ToolControls } from "./ToolControls";
 import { MediaPreview } from "./MediaPreview";
 import { ToolNavigation, toolGroup, toolIcons } from "./ToolNavigation";
+import { SampleHelp } from "./SampleHelp";
 import { Aperture, ArrowDownToLine, ArrowUpRight, ChevronRight, History, Plus, Settings2, Sparkles, Video, X } from "lucide-react";
 import "./style.css";
 
@@ -307,6 +308,26 @@ export default function App() {
       if (alive.current) setUploading(false);
     }
   };
+  const loadSample = async () => {
+    if (source || busy.current || sourceMutation.current || sourceKind !== "image") return;
+    sourceMutation.current = true;
+    setUploading(true);
+    setError("");
+    const sequence = ++sourceSequence.current;
+    try {
+      const response = await fetch("./sample-image.jpg");
+      if (!response.ok) throw new Error("Couldn't load the sample image. Try again.");
+      const blob = await response.blob();
+      if (!alive.current || sequence !== sourceSequence.current) return;
+      sourceMutation.current = false;
+      await upload(new File([blob], "marcostudio-sample.jpg", {type: "image/jpeg"}));
+    } catch (error) {
+      if (alive.current) setError(message(error));
+    } finally {
+      sourceMutation.current = false;
+      if (alive.current) setUploading(false);
+    }
+  };
   const removeInput = (key: string) => {
     if (busy.current || sourceMutation.current) return;
     const slots = feature?.input_slots ?? [];
@@ -555,6 +576,7 @@ export default function App() {
               busy={sourceBusy || !!retry} uploading={uploading} loading={loadingSelection}
               progress={job?.progress} activity={selectedActive ? activityLabel(job!.status) : undefined}
               upload={file => void upload(file)} />
+            <SampleHelp imageTool={sourceKind === "image"} hasSource={!!source} disabled={sourceBusy || !!retry || !studio} onLoadSample={() => void loadSample()}/>
             {(source || result) && (
               <div className="result-toolbar">
                 <div>

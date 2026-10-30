@@ -463,3 +463,26 @@ select option { color: var(--text); background: #242629; }
   .onboarding input { font-size: 16px; }
   .setup-actions { flex-wrap: wrap; }
 }
+
+.model-selection { margin-top: 16px; }
+.model-selection ul { list-style: none; padding: 0; margin: 10px 0; }
+.model-selection li { position: relative; padding: 9px 60px 9px 0; border-bottom: 1px solid #303034; overflow-wrap: anywhere; }
+.model-choice { display: flex; align-items: flex-start; gap: 8px; }
+.model-name { display: flex; flex: 1; min-width: 0; align-items: flex-start; gap: 10px; font-size: 12px; line-height: 1.4; }
+.model-name span { min-width: 0; overflow-wrap: anywhere; }
+.model-unavailable { padding-left: 28px; }
+.model-size { flex: none; color: #aaa; font-size: 11px; white-space: nowrap; }
+.model-state { display: block; color: #aaa; font-size: 11px; padding: 4px 0 0 28px; }
+.onboarding .model-details { margin: 0 0 0 28px; }
+.onboarding .model-details summary { position: absolute; right: 0; top: 5px; padding: 4px 0 4px 8px; font-size: 11px; }
+.model-details[open] { padding: 8px 0 0; }
+.model-select-all, .model-confirm { display: flex; align-items: flex-start; gap: 10px; font-size: 12px; line-height: 1.5; }
+.onboarding .model-selection input[type="checkbox"] { flex: none; width: 18px; height: 18px; min-height: 18px; margin: 1px 0 0; accent-color: #eaff72; }
+
+/* Secondary setup details use the same dialog instead of growing the main flow. */
+.setup-secondary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.onboarding .setup-secondary button, .onboarding .setup-back { background: transparent; color: #d6d6df; }
+.onboarding .setup-back { margin: 0 0 12px; }
+.model-selection li { min-height: 44px; }
+.onboarding .model-details-button { position: absolute; top: 0; right: 0; min-height: 44px; padding: 0 3px; border: 0; background: transparent; color: #bbb; font-size: 11px; }
+.model-detail-name { overflow-wrap: anywhere; }
