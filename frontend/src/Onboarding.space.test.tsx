@@ -1,0 +1,27 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, expect, it, vi } from "vitest";
+import { Onboarding } from "./Onboarding";
+import type { Doctor } from "./api";
+const calls = vi.hoisted(() => ({check: vi.fn(), start: vi.fn(), supports: vi.fn()}));
+vi.mock("./browser/manager", () => ({canInstall: () => true, installTasks: () => [], managerAvailable: async () => true, reconcileInstalls: async () => [], resumeDownloads: vi.fn(), startDownloads: calls.start}));
+vi.mock("./browser/connection", () => ({CONNECTION_DRAFT_KEY: "draft", endpoint: () => "http://127.0.0.1:8192", discover: vi.fn(), normalizeAddress: (v: string) => v, selectConnection: vi.fn()}));
+vi.mock("./browser/modelSpace", async original => ({...await original<typeof import("./browser/modelSpace")>(), checkStorage: calls.check, supportsStoragePairing: calls.supports}));
+const id = "a".repeat(64);
+const model = {key: "first", filename: "first.safetensors", category: "vae", url: "https://example.com/first", size: 2e9, sha256: id, repository: "a/b", loader: "", field: "", available: false, installable: true};
+const doctor = {connected: true, address: "http://127.0.0.1:8192", ready: false, model_requirements: [model], checks: []} as unknown as Doctor;
+const result = (available: number) => ({version: 1, models: [{id, status: "available", available_bytes: available, volume: "disk"}]});
+beforeEach(() => { vi.stubGlobal("localStorage", {getItem: vi.fn(() => null), setItem: vi.fn(), removeItem: vi.fn()}); calls.check.mockReset().mockResolvedValue(result(5e9)); calls.supports.mockReset().mockResolvedValue(true); calls.start.mockReset().mockResolvedValue([]); HTMLDialogElement.prototype.showModal = function () {this.setAttribute("open", "");}; });
+it("shows destination space, then rechecks before the user-confirmed download", async () => {
+  const user = userEvent.setup(); render(<Onboarding featureId="relight" doctor={doctor} checking={false} locked={false} refresh={async () => {}} connected={async () => {}} close={() => {}}/>);
+  await user.type(await screen.findByLabelText("Helper pairing code"), "secret");
+  await user.click(screen.getByRole("button", {name: "Check disk space"}));
+  await user.click(await screen.findByRole("checkbox", {name: /Select first/}));
+  expect(await screen.findByText(/5.0 GB available/)).toBeVisible();
+  await user.click(screen.getByRole("checkbox", {name: /I confirm downloading/}));
+  calls.check.mockResolvedValue(result(1e9));
+  await user.click(screen.getByRole("button", {name: "Download selected"}));
+  expect(await screen.findByText(/Not enough available disk space/)).toBeVisible();
+  expect(calls.start).not.toHaveBeenCalled();
+  await waitFor(() => expect(calls.check).toHaveBeenCalledTimes(2));
+});

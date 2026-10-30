@@ -6,6 +6,7 @@ import { CONNECTION_DRAFT_KEY, discover, endpoint, normalizeAddress, selectConne
 import { ConnectionHelp } from "./ConnectionHelp";
 import { canInstall, installTasks, managerAvailable, reconcileInstalls, resumeDownloads, startDownloads, type InstallTask } from "./browser/manager";
 import type { Requirements } from "./browser/requirements";
+import { checkStorage, spaceGroups, supportsStoragePairing, type SpaceReport } from "./browser/modelSpace";
 
 export const enteredKey = () => `marcostudio.entered:${endpoint()}`;
 const formatSize = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
@@ -96,6 +97,12 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
   const [manager, setManager] = useState(false);
+  const [spaceSupported, setSpaceSupported] = useState(false);
+  const [pairInput, setPairInput] = useState("");
+  const [pair, setPair] = useState<{address: string; token: string} | null>(null);
+  const [space, setSpace] = useState<SpaceReport | null>(null);
+  const [spaceMessage, setSpaceMessage] = useState("");
+  const [spaceChecking, setSpaceChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [tasks, setTasks] = useState<InstallTask[]>(() => installTasks());
   const [selected, setSelected] = useState<string[]>([]);
@@ -129,6 +136,26 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const ready = !!report?.ready && !checking && connectedHere;
   const step = connectedHere ? report.ready ? 2 : 1 : 0;
   const connectionBusy = connecting || locked || installing || unfinished.length > 0;
+  const spaceSummary = pair?.address === endpoint() && space ? spaceGroups(chosen, space) : null;
+  const inadequateSpace = !!spaceSummary?.groups.some(group => group.needed > group.available);
+
+  useEffect(() => {
+    const address = endpoint(); let active = true;
+    setSpaceSupported(false); setPair(null); setPairInput(""); setSpace(null); setSpaceMessage("");
+    if (connectedHere) void supportsStoragePairing(address).then(available => { if (active) setSpaceSupported(available); });
+    return () => { active = false; };
+  }, [connectedHere, report?.address]);
+
+  useEffect(() => {
+    if (!pair || pair.address !== endpoint() || !chosen.length) { setSpace(null); setSpaceChecking(false); setSpaceMessage(""); return; }
+    let active = true;
+    setSpace(null); setSpaceChecking(true); setSpaceMessage("");
+    void checkStorage(pair.address, pair.token, chosen).then(result => {
+      if (active) setSpace(result);
+    }).catch(() => { if (active) setSpaceMessage("Couldn't check available space. Check pairing and try again."); })
+      .finally(() => { if (active) setSpaceChecking(false); });
+    return () => { active = false; };
+  }, [pair, selectionKey]);
 
   useEffect(() => {
     current.current = true;
@@ -224,6 +251,13 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
       else {
         if (queueBlocked) throw new Error("Wait until the ComfyUI Manager queue is available and idle before starting new downloads.");
         if (!chosen.length || confirmed !== selectionKey) throw new Error("Select models and confirm the download first.");
+        if (pair && pair.address === target) {
+          const fresh = await checkStorage(target, pair.token, chosen);
+          const summary = spaceGroups(chosen, fresh);
+          if (summary.unknown) throw new Error("Couldn't check every model destination. Check the drive before downloading.");
+          if (summary.groups.some(group => group.needed > group.available)) throw new Error("Not enough available disk space for the selected models. Free space and check again.");
+          if (current.current) setSpace(fresh);
+        }
         await startDownloads(chosen);
         if (current.current) { setSelected([]); setConfirmed(""); }
       }
@@ -261,7 +295,20 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {pendingDownloads && reviewModels && <button className="setup-back" onClick={() => setReviewModels(false)}>← Back to download progress</button>}
         {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
           <h3 id="missing-models-title">Missing models</h3>
-          <p>Available disk space cannot be checked here. Check the drive where ComfyUI stores models, including extra room for temporary files.</p>
+          {!pair && <p>Available disk space cannot be checked here. Check the drive where ComfyUI stores models, including extra room for temporary files.</p>}
+          {spaceSupported && !pair && <form onSubmit={event => {event.preventDefault(); if (pairInput.trim()) { setPair({address: endpoint(), token: pairInput.trim()}); setPairInput(""); }}}>
+            <label>Helper pairing code <input type="password" autoComplete="off" value={pairInput} onChange={event => setPairInput(event.target.value)}/></label>
+            <button type="submit" disabled={!pairInput.trim()}>Check disk space</button>
+          </form>}
+          {pair && <div aria-live="polite">
+            {!chosen.length && <p>Select models to check their destination drives.</p>}
+            {spaceChecking && <p>Checking available disk space…</p>}
+            {spaceMessage && <p>{spaceMessage}</p>}
+            {spaceSummary?.groups.map((group, index) => <p key={index}>Destination {index + 1}: {formatSize(group.available)} available · {formatSize(group.needed)} selected{group.needed > group.available ? " · Not enough space" : ""}</p>)}
+            {spaceSummary?.unknown && <p>Available space is unknown for some selected models. Check their destination drives.</p>}
+            {spaceSummary && <p>Space can change; allow extra room for temporary files.</p>}
+            <button type="button" onClick={() => {setPair(null); setSpace(null); setSpaceMessage("");}}>Unpair</button>
+          </div>}
           {!pendingDownloads && manager && toInstall.length > 0 && <label className="model-select-all"><input type="checkbox" checked={allSelected} disabled={installing || checking}
             onChange={event => { setSelected(event.target.checked ? toInstall.map(model => model.url) : []); setConfirmed(""); }}/> Select all available downloads</label>}
           <ul>{missing.map(model => {
@@ -286,7 +333,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
           </>}
         </section>}
         {!pendingDownloads && <div className="setup-actions">
-          {manager && toInstall.length > 0 && <button className="setup-primary" disabled={installing || checking || queueBlocked || !chosen.length || confirmed !== selectionKey} onClick={() => void install()}>{installing ? "Starting…" : "Download selected"}</button>}
+          {manager && toInstall.length > 0 && <button className="setup-primary" disabled={installing || checking || queueBlocked || !chosen.length || confirmed !== selectionKey || (!!pair && (spaceChecking || !space || !!spaceMessage || !!spaceSummary?.unknown || inadequateSpace))} onClick={() => void install()}>{installing ? "Starting…" : "Download selected"}</button>}
           <a href={report?.address} target="_blank" rel="noopener noreferrer">Open ComfyUI <ExternalLink size={13}/></a>
         </div>}
         {!reviewModels && report?.checks.filter(check => check.name === "manager:queue" && check.status === "fail"
