@@ -30,6 +30,11 @@ import { draftAssets, savedDraft, saveDraft } from "./browser/draft";
 import { InputAssets, SourceInput, ToolControls } from "./ToolControls";
 import { MediaPreview } from "./MediaPreview";
 import { ToolNavigation, toolGroup, toolIcons } from "./ToolNavigation";
+import { SampleHelp } from "./SampleHelp";
+import { Notifications, useNotifications } from "./Notifications";
+import { endpoint } from "./browser/connection";
+import { installTasks, reconcileInstalls, type InstallTask } from "./browser/manager";
+import { createDownloadSnapshots, observeDownloadTasks, shouldAnnounceConnection } from "./notificationEvents";
 import { Aperture, ArrowDownToLine, ArrowUpRight, ChevronRight, History, Plus, Settings2, Sparkles, Video, X } from "lucide-react";
 import "./style.css";
 
@@ -98,6 +103,18 @@ export default function App() {
   const [error, setError] = useState("");
   const [retry, setRetry] = useState<Submission>();
   const [showSettings, setShowSettings] = useState(false);
+  const {notices, notify, dismiss, announced} = useNotifications();
+  const downloadBaseline = useRef(createDownloadSnapshots());
+  const lastConnection = useRef("");
+  const jobBaseline = useRef(new Map<string, string>());
+  const jobsInitialized = useRef(false);
+  const observeDownloads = useCallback((address: string, tasks: InstallTask[], newTaskIds: string[] = []) => {
+    for (const event of observeDownloadTasks(downloadBaseline.current, address, tasks, newTaskIds)) notify(event.text, event.failure);
+  }, [notify]);
+  const observeConnection = useCallback((address: string, automatic = false) => {
+    if (shouldAnnounceConnection(lastConnection.current, address, automatic)) notify(`ComfyUI connected at ${address}`);
+    lastConnection.current = address;
+  }, [notify]);
   const [comparison, setComparison] = useState(50);
   const [view, setView] = useState<"result" | "compare">("result");
   const busy = useRef(false);
@@ -106,6 +123,40 @@ export default function App() {
   const sourceMutation = useRef(false);
   const doctorSequence = useRef(0);
   const job = jobs.find((item) => item.id === selected);
+  useEffect(() => {
+    if (!loaded) return;
+    if (!jobsInitialized.current) { jobs.forEach(item => jobBaseline.current.set(item.id, item.status)); jobsInitialized.current = true; return; }
+    for (const item of jobs) {
+      const previous = jobBaseline.current.get(item.id);
+      if (previous && !["failed", "succeeded", "canceled", "abandoned"].includes(previous) && item.status === "failed") {
+        const time = typeof item.elapsed_seconds === "number" && Number.isFinite(item.elapsed_seconds) && item.elapsed_seconds >= 0
+          ? ` after ${Math.floor(item.elapsed_seconds)}s` : "";
+        notify(`${features.find(feature => feature.id === item.feature)?.name ?? item.feature} task failed${time}. See task history for details.`, true);
+      }
+      jobBaseline.current.set(item.id, item.status);
+    }
+  }, [jobs, loaded, features, notify]);
+  useEffect(() => {
+    if (!isBrowserRuntime() || showSettings) return;
+    let stopped = false;
+    let busy = false;
+    const poll = async () => {
+      const address = endpoint();
+      if (!address || busy || document.hidden) return;
+      busy = true;
+      try {
+        const before = installTasks(address); observeDownloads(address, before);
+        if (before.some(task => task.state !== "succeeded" && task.state !== "failed")) {
+          const after = await reconcileInstalls(address);
+          if (!stopped && address === endpoint()) observeDownloads(address, after);
+        }
+      } catch (error) { if (!stopped) console.warn("Unable to check model download status", error); }
+      finally { busy = false; }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 7000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [showSettings, observeDownloads]);
   const result = job?.status === "succeeded" ? job.outputs[0] : undefined;
   const selectedActive = !!job && active(job);
   const activeJob =
@@ -307,6 +358,26 @@ export default function App() {
       if (alive.current) setUploading(false);
     }
   };
+  const loadSample = async () => {
+    if (source || busy.current || sourceMutation.current || sourceKind !== "image") return;
+    sourceMutation.current = true;
+    setUploading(true);
+    setError("");
+    const sequence = ++sourceSequence.current;
+    try {
+      const response = await fetch("./sample-image.jpg");
+      if (!response.ok) throw new Error("Couldn't load the sample image. Try again.");
+      const blob = await response.blob();
+      if (!alive.current || sequence !== sourceSequence.current) return;
+      sourceMutation.current = false;
+      await upload(new File([blob], "marcostudio-sample.jpg", {type: "image/jpeg"}));
+    } catch (error) {
+      if (alive.current) setError(message(error));
+    } finally {
+      sourceMutation.current = false;
+      if (alive.current) setUploading(false);
+    }
+  };
   const removeInput = (key: string) => {
     if (busy.current || sourceMutation.current) return;
     const slots = feature?.input_slots ?? [];
@@ -326,6 +397,7 @@ export default function App() {
     try {
       const created = await post<Job>(request.url, request.body);
       if (alive.current) {
+        if (created.status === "failed") jobBaseline.current.set(created.id, "submitting");
         upsert(created);
         setSelected(created.id);
         setView("result");
@@ -334,6 +406,7 @@ export default function App() {
       if (alive.current) {
         setError(message(e));
         if (e instanceof ServiceError && e.uncertain) setRetry(request);
+        else notify(`Couldn't start task: ${message(e)}`, true);
       }
     } finally {
       busy.current = false;
@@ -475,7 +548,7 @@ export default function App() {
             <span>{toolGroup(featureId)}</span><ChevronRight size={13} aria-hidden="true" />
             <h1>{feature?.name ?? "Relight"}</h1>
           </div>
-          <div
+          {(checking || doctor?.ready || activeJob || posting) && <div
             className={`service-state ${!activeJob && !posting && doctor?.ready ? "ready" : ""}`}
             role="status"
             aria-label="Studio status"
@@ -488,15 +561,15 @@ export default function App() {
                 : checking
                   ? "Checking connection…"
                   : doctor?.ready
-                    ? "ComfyUI connected"
+                    ? doctor.checks.some(check => check.name.startsWith("integrity-unverified:") && check.status === "warn") ? "Connected · Models unverified" : "ComfyUI connected"
                     : "Setup needed"}
-            {!checking && !doctor?.ready && (
-              <button disabled={!studio} onClick={() => setShowSettings(true)}>
-                Open setup
-              </button>
-            )}
-          </div>
+          </div>}
         </div>
+        {!checking && doctor?.ready && doctor.checks.some(check => check.name.startsWith("integrity-unverified:") && check.status === "warn") && <section className="setup-banner" aria-label="Models unverified"><div><strong>Models unverified</strong><span>You chose to continue without verifying some model files in this session.</span></div><button onClick={() => setShowSettings(true)}>Review setup</button></section>}
+        {!checking && !doctor?.ready && <section className="setup-banner" aria-label="Setup needed">
+          <div><strong>Setup needed</strong><span>Finish setup to use {feature?.name ?? "Relight"}.</span></div>
+          <button disabled={!studio} onClick={() => setShowSettings(true)}>Open setup <ArrowUpRight size={15} aria-hidden="true"/></button>
+        </section>}
         {(error || retry) && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
@@ -555,6 +628,7 @@ export default function App() {
               busy={sourceBusy || !!retry} uploading={uploading} loading={loadingSelection}
               progress={job?.progress} activity={selectedActive ? activityLabel(job!.status) : undefined}
               upload={file => void upload(file)} />
+            <SampleHelp imageTool={sourceKind === "image"} hasSource={!!source} disabled={sourceBusy || !!retry || !studio} onLoadSample={() => void loadSample()}/>
             {(source || result) && (
               <div className="result-toolbar">
                 <div>
@@ -811,10 +885,13 @@ export default function App() {
       </main>
       {showSettings && isBrowserRuntime() && <Onboarding feature={feature} featureId={featureId}
         doctor={doctor} checking={checking} locked={!!activeJob || posting || !!retry} refresh={refreshDoctor}
+        notices={<Notifications notices={notices} dismiss={dismiss} announced={announced}/>} onConnection={observeConnection} onTasks={observeDownloads}
         connected={async () => {
           const value = await api<StudioSettings>("/api/settings");
           if (studio?.comfy_url && studio.comfy_url !== value.comfy_url) {setSource(undefined); setInputs({}); setSelected(undefined);}
-          setStudio(value); setJobs(await api<Job[]>("/api/jobs")); await refreshDoctor();
+          const history = await api<Job[]>("/api/jobs");
+          jobBaseline.current.clear(); jobsInitialized.current = false;
+          setStudio(value); setJobs(history); await refreshDoctor();
         }} close={closeSettings} />}
       {showSettings && !isBrowserRuntime() && (
         <SettingsDialog
@@ -836,6 +913,7 @@ export default function App() {
           }}
         />
       )}
+      {!(showSettings && isBrowserRuntime()) && <Notifications notices={notices} dismiss={dismiss} announced={announced}/>}
     </div>
   );
 }

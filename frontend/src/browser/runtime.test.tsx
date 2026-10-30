@@ -6,8 +6,15 @@ import { catalog, compile, getFeature } from "./catalog";
 import { CONNECTION_KEY, discover, selectConnection } from "./connection";
 import { installTasks, managerAvailable, reconcileInstalls, startDownloads } from "./manager";
 import { checkRequirements } from "./requirements";
+import { allowUnverified, clearUnverified, integrityStates } from "./integrity";
 import { browserApi } from "./runtime";
 import { getAsset, uploadAsset } from "./assets";
+
+// These tests exercise the surrounding runtime with integrity already verified.
+// Integrity's missing/invalid paths are covered by its dedicated tests.
+vi.mock("./integrity", async original => ({...await original<typeof import("./integrity")>(),
+  integrityStates: vi.fn(async (_address: string, models: {sha256: string}[]) => new Map(models.map(model => [model.sha256, "matched"]))),
+}));
 
 const blobs = vi.hoisted(() => new Map<string, Blob>());
 vi.mock("./storage", async importOriginal => ({...await importOriginal<typeof import("./storage")>(),
@@ -20,6 +27,7 @@ vi.mock("./assets", async importOriginal => ({...await importOriginal<typeof imp
 }));
 const address = "http://127.0.0.1:8188";
 let missing = false, available = true, manager = false, losePrompt = false, loseDownload = false;
+let managerQueue: "idle" | "active" | "unknown" = "idle";
 let pending: unknown[][], history: Record<string, unknown>, taskHistory: Record<string, unknown>;
 let batchOperations: unknown[];
 let calls: {path: string; method: string; body: any}[];
@@ -51,7 +59,9 @@ beforeEach(() => {
   const saved = new Map<string, string>();
   vi.stubGlobal("localStorage", {getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => saved.set(key, value), removeItem: (key: string) => saved.delete(key)});
   useBrowserRuntime(browserApi);
-  blobs.clear();
+  blobs.clear(); clearUnverified();
+  vi.mocked(integrityStates).mockImplementation(async (_address, models) => new Map(models.map(model => [model.sha256, "matched"])));
+  managerQueue = "idle";
   missing = false; available = true; manager = false; losePrompt = false; loseDownload = false;
   pending = []; history = {}; taskHistory = {}; batchOperations = []; calls = [];
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {configurable: true, value: function(this: HTMLDialogElement) {this.setAttribute("open", "");}});
@@ -61,6 +71,7 @@ beforeEach(() => {
     calls.push({path, method, body});
     if (url.port === "8000" || !available) throw new TypeError("Failed to fetch");
     if (path === "/system_stats") return json({system: {comfyui_version: "0.18.0"}, devices: []});
+    if (path === "/marcostudio/capabilities") return json({error: "Not found"}, 404);
     if (path.startsWith("/object_info/")) {
       const name = decodeURIComponent(path.split("/").pop()!); const value = definitions()[name];
       return json(value ? {[name]: value} : {});
@@ -76,7 +87,7 @@ beforeEach(() => {
     }
     if (path.startsWith("/v2/manager/queue/")) {
       if (!manager) return json({error: "Not found"}, 404);
-      if (path.endsWith("/status")) return json({total_count: 0, pending_count: 0, in_progress_count: 0, is_processing: false});
+      if (path.endsWith("/status")) return managerQueue === "unknown" ? json({error: "unavailable"}, 503) : json({total_count: 0, pending_count: managerQueue === "active" ? 1 : 0, in_progress_count: 0, is_processing: false});
       if (path.endsWith("/history_list")) return json({ids: batchOperations.length ? ["completed-batch"] : []});
       if (path.endsWith("/history")) return json(url.searchParams.has("id") ? {operations: batchOperations} : {history: taskHistory});
       if (path.endsWith("/install_model")) {
@@ -167,7 +178,9 @@ describe("direct ComfyUI onboarding", () => {
     expect(localStorage.getItem(CONNECTION_KEY)).toBeNull();
     view.unmount(); render(<App/>);
     dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", {name: "Change address"}));
     expect(within(dialog).getByLabelText("ComfyUI address")).toHaveValue("http://127.0.0.1:9194");
+    fireEvent.click(within(dialog).getByRole("button", {name: /Back to setup/}));
     available = true;
     await act(async () => { window.dispatchEvent(new Event("focus")); });
     await within(dialog).findByText("ComfyUI connected");
@@ -179,6 +192,44 @@ describe("direct ComfyUI onboarding", () => {
 });
 
 describe("native generation and installation recovery", () => {
+  it("allows an explicitly consented manual install to submit while preserving the unverified warning", async () => {
+    selectConnection(address);
+    vi.mocked(integrityStates).mockImplementation(async (_address, models) => new Map(models.map(model => [model.sha256, "unverified"])));
+    const feature = getFeature("create-image"), mode = feature.defaults.mode;
+    const before = await checkRequirements("create-image", mode);
+    await allowUnverified(address, before.model_requirements.filter(model => model.available));
+    const after = await checkRequirements("create-image", mode);
+    expect(after.ready).toBe(true);
+    expect(after.checks.some(check => check.name.startsWith("integrity-unverified:") && check.status === "warn")).toBe(true);
+    const body = {request_id: crypto.randomUUID(), feature: "create-image", source_id: null,
+      inputs: {}, settings: {...feature.defaults, instruction: "A cedar tree"}};
+    expect((await post<Job>("/api/jobs", body)).status).toBe("queued");
+    expect(calls.filter(call => call.path === "/prompt")).toHaveLength(1);
+  });
+  it("requires explicit session consent for manual models and still blocks active or unknown queues", async () => {
+    selectConnection(address);
+    vi.mocked(integrityStates).mockImplementation(async (_address, models) => new Map(models.map(model => [model.sha256, "unverified"])));
+    const mode = getFeature("create-image").defaults.mode;
+    const before = await checkRequirements("create-image", mode);
+    expect(before.ready).toBe(false);
+    await allowUnverified(address, before.model_requirements.filter(model => model.available));
+    const accepted = await checkRequirements("create-image", mode);
+    expect(accepted.ready).toBe(true);
+    expect(accepted.checks.some(check => check.status === "warn" && check.name.startsWith("integrity-unverified:"))).toBe(true);
+    manager = true; managerQueue = "active";
+    const request = {request_id: crypto.randomUUID(), feature: "create-image", source_id: null,
+      inputs: {}, settings: {...getFeature("create-image").defaults, instruction: "A cedar tree"}};
+    expect((await post<Job>("/api/jobs", request)).status).toBe("failed");
+    expect(calls.filter(call => call.path === "/prompt")).toHaveLength(0);
+    const active = await checkRequirements("create-image", mode);
+    expect(active.ready).toBe(false);
+    expect(active.checks.find(check => check.name === "manager:queue")?.status).toBe("fail");
+    managerQueue = "unknown";
+    expect((await checkRequirements("create-image", mode)).ready).toBe(false);
+    manager = false;
+    // Observed queue activity invalidates the prior fallback consent.
+    expect((await checkRequirements("create-image", mode)).ready).toBe(false);
+  });
   it("stores normalized uploads before sending them to ComfyUI and restores their metadata", async () => {
     selectConnection(address);
     vi.stubGlobal("createImageBitmap", vi.fn(async () => ({width: 640, height: 480, close: vi.fn()})));
@@ -191,6 +242,18 @@ describe("native generation and installation recovery", () => {
     expect(upload.body.get("image").name).not.toContain("portrait");
     expect(blobs.get(`${address}:${asset.id}`)?.type).toBe("image/png");
     expect(await getAsset(asset.id)).toMatchObject({id: asset.id, width: 640, height: 480, filename: "portrait.png"});
+    expect(calls.filter(call => call.path === "/prompt")).toHaveLength(0);
+  });
+  it("refuses generation when a verified snapshot changes before submission", async () => {
+    selectConnection(address);
+    vi.mocked(integrityStates)
+      .mockImplementationOnce(async (_address, models) => new Map(models.map(model => [model.sha256, "matched"])))
+      .mockImplementationOnce(async (_address, models) => new Map(models.map(model => [model.sha256, "unverified"])));
+    const body = {request_id: crypto.randomUUID(), feature: "create-image", source_id: null,
+      inputs: {}, settings: {...getFeature("create-image").defaults, instruction: "A cedar tree"}};
+    const result = await post<Job>("/api/jobs", body);
+    expect(result.status).toBe("failed");
+    expect(result.error).toMatch(/verification changed/i);
     expect(calls.filter(call => call.path === "/prompt")).toHaveLength(0);
   });
   it("recovers a lost prompt acknowledgement by request identity and survives a page reload", async () => {
@@ -229,7 +292,7 @@ describe("native generation and installation recovery", () => {
     await startDownloads([model]);
     expect(calls.filter(call => call.path.endsWith("install_model"))).toHaveLength(1);
     taskHistory[task.id] = {ui_id: task.id, result: "Disk full", status: {status_str: "failed", completed: true, messages: ["Disk full"]}};
-    expect((await reconcileInstalls())[0].error).toBe("Disk full");
+    expect((await reconcileInstalls())[0].error).toContain("ComfyUI reports: Disk full.");
     loseDownload = false;
     await startDownloads([model]);
     const submissions = calls.filter(call => call.path.endsWith("install_model"));

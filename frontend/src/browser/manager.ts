@@ -7,12 +7,21 @@ const ROOT = "/v2/manager/queue";
 // Manager resolves these types through folder_paths, honoring extra model paths.
 // Categories without a supported mapping use manual downloads, never models/etc.
 const types: Record<string, string> = {diffusion_models: "diffusion_model", text_encoders: "text_encoders", vae: "vae", loras: "lora", controlnet: "controlnet"};
-export const canInstall = (model: Model) => !!types[model.category];
-export interface InstallTask {id: string; model: Model; state: "submitting" | "queued" | "succeeded" | "failed" | "unknown"; error?: string; sawMissingFile?: boolean}
+export const managerType = (model: Model) => types[model.category];
+export const canInstall = (model: Model) => !!managerType(model);
+export interface InstallTask {id: string; model: Model; state: "submitting" | "queued" | "succeeded" | "failed" | "unknown"; error?: string; sawMissingFile?: boolean; batchId?: string; submittedAt?: number; observedFinishedAt?: number}
 interface Status {total_count: number; in_progress_count: number; pending_count: number; is_processing: boolean}
 interface TaskResult {ui_id: string; result: string; status?: {status_str: string; completed: boolean; messages: string[]}}
 interface BatchOperation {operation_id: string; result: string; client_id?: string; error_message?: string; end_time?: string}
 const batchCache = new Map<string, BatchOperation[]>();
+// Manager can collapse the underlying error (including ENOSPC) into a generic
+// installation failure, so offer possible remedies without claiming a cause.
+const downloadFailure = "Download failed. Check free space on the drive used by ComfyUI and your internet connection. Check for an incomplete model file before retrying.";
+function failureGuidance(detail?: string) {
+  // Only repeat a recognized error; arbitrary Manager output can contain URLs or paths.
+  return detail && /^(disk full|no space left on device|enospc)$/i.test(detail.trim())
+    ? `ComfyUI reports: Disk full. ${downloadFailure}` : downloadFailure;
+}
 export const installTasks = (address = endpoint()) => read<InstallTask[]>(address, "installs", []);
 export function saveInstallTasks(address: string, updates: InstallTask[]) {
   const tasks = new Map(installTasks(address).map(task => [task.id, task]));
@@ -46,7 +55,9 @@ export async function reconcileInstalls(address = endpoint()) {
     const result = data && ("ui_id" in data ? data as TaskResult : (data as Record<string, TaskResult>)[task.id]);
     if (!result?.status?.completed) { unresolved.push(task); continue; }
     task.state = ["success", "skipped", "skip"].includes(result.status.status_str) ? "succeeded" : "failed";
-    task.error = task.state === "failed" ? result.status.messages?.join("; ") || result.result || "Download failed." : undefined;
+    task.observedFinishedAt ??= Date.now();
+    if (task.state === "failed") console.warn("ComfyUI model download failed; see ComfyUI logs for details.");
+    task.error = task.state === "failed" ? failureGuidance(result.status.messages?.join("; ") || result.result) : undefined;
   }
   if (unresolved.length) {
     // Manager's in-memory history disappears on restart; completed batches are
@@ -66,7 +77,9 @@ export async function reconcileInstalls(address = endpoint()) {
             const task = unresolved.find(task => task.id === operation.operation_id);
             if (!task || !operation.end_time || (operation.client_id && operation.client_id !== clientId())) continue;
             task.state = ["success", "skipped", "skip"].includes(operation.result) ? "succeeded" : "failed";
-            task.error = task.state === "failed" ? operation.error_message || "Download failed in ComfyUI." : undefined;
+            task.observedFinishedAt ??= Date.now();
+            if (task.state === "failed") console.warn("ComfyUI model download failed; see ComfyUI logs for details.");
+            task.error = task.state === "failed" ? failureGuidance(operation.error_message) : undefined;
           }
         }
       } catch { /* Missing batch history leaves the request uncertain, not retryable. */ }
@@ -76,8 +89,7 @@ export async function reconcileInstalls(address = endpoint()) {
   return installTasks(address);
 }
 
-export async function startDownloads(models: Model[]) {
-  const address = endpoint();
+export async function startDownloads(models: Model[], address = endpoint()) {
   const run = () => installModels(address, models);
   return navigator.locks ? await navigator.locks.request(`marcostudio:downloads:${address}`, run) : run();
 }
@@ -86,11 +98,24 @@ async function installModels(address: string, models: Model[]) {
   if (!await managerAvailable(address)) throw new Error("Open ComfyUI to enable model downloads.");
   const tasks = await reconcileInstalls(address);
   const unique = [...new Map(models.map(model => [model.url, model])).values()];
+  // Recheck the whole queue immediately before a batch. Another browser can
+  // start a task after the last readiness poll; client-filtered counts miss it.
+  let status: Status;
+  try { status = await request<Status>(address, `${ROOT}/status`); }
+  catch { throw new Error("Couldn't check the ComfyUI Manager queue. Check the connection and try again."); }
+  if (!Number.isInteger(status?.pending_count) || status.pending_count < 0
+    || !Number.isInteger(status?.in_progress_count) || status.in_progress_count < 0
+    || typeof status?.is_processing !== "boolean")
+    throw new Error("Couldn't check the ComfyUI Manager queue. Check the connection and try again.");
+  if (status.pending_count > 0 || status.in_progress_count > 0 || status.is_processing)
+    throw new Error("ComfyUI Manager has setup tasks in progress. Wait for its queue to finish, then try again.");
   let queued = false;
+  const batchId = crypto.randomUUID();
+  const submittedAt = Date.now();
   for (const model of unique) {
     if (!canInstall(model)) continue;
     if (tasks.some(task => task.model.url === model.url && !["failed", "succeeded"].includes(task.state))) continue;
-    const task: InstallTask = {id: crypto.randomUUID(), model, state: "submitting"};
+    const task: InstallTask = {id: crypto.randomUUID(), model, state: "submitting", batchId, submittedAt};
     tasks.push(task); saveInstallTasks(address, [task]);
     try {
       await send(address, `${ROOT}/install_model`, {name: model.filename, filename: model.filename,
@@ -98,7 +123,9 @@ async function installModels(address: string, models: Model[]) {
       task.state = "queued"; queued = true;
     } catch (error) {
       task.state = error instanceof ServiceError && !error.uncertain ? "failed" : "unknown";
-      task.error = error instanceof Error ? error.message : "Couldn't confirm this download.";
+      if (task.state === "failed") task.observedFinishedAt = Date.now();
+      if (task.state === "failed") console.warn("ComfyUI model download request failed; see ComfyUI logs for details.");
+      task.error = task.state === "failed" ? downloadFailure : error instanceof Error ? error.message : "Couldn't confirm this download.";
     }
     saveInstallTasks(address, [task]);
     if (task.state === "unknown") break;

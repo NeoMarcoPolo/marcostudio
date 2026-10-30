@@ -4,6 +4,7 @@ import {
   waitFor,
   fireEvent,
   act,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
@@ -79,6 +80,14 @@ const deferred = () => {
 };
 const creativeDefaults = {mode: "standard", seed: 0, instruction: "", width: 1024, height: 1024, resolution: 1024};
 let calls: { url: string; method: string; body: any }[] = [];
+it("announces a newly failed task once with its reported elapsed time", async () => {
+  history = [{...job, status: "running", outputs: []}];
+  polledJob = {...job, status: "failed", outputs: [], elapsed_seconds: 200};
+  render(<App/>);
+  await screen.findByText("Generating…");
+  expect(await screen.findByText("Relight task failed after 200s. See task history for details.", {selector: ".notification > span"}, {timeout: 5000})).toBeInTheDocument();
+  expect(screen.getAllByText("Relight task failed after 200s. See task history for details.", {selector: ".notification > span"})).toHaveLength(1);
+});
 beforeEach(() => {
   history = [];
   extraFeatures = [];
@@ -227,7 +236,7 @@ describe("image and video tools", () => {
     const player = await screen.findByLabelText("Result: waves.mp4");
     expect(player.tagName).toBe("VIDEO");
     expect(screen.getByLabelText("Prompt")).toHaveValue("Moving waves");
-    expect(screen.getByRole("link", {name: /Download/})).toHaveAttribute("download", "waves.mp4");
+    expect(screen.getByRole("link", {name: "Download"})).toHaveAttribute("download", "waves.mp4");
     expect(calls.some(c => c.url.includes("null/meta"))).toBe(false);
   });
   it("opens retired Flash keyframes in Standard without changing the recorded job", async () => {
@@ -376,9 +385,10 @@ describe("Relight studio", () => {
   it("blocks Generate when readiness fails and opens actionable setup", async () => {
     ready = false;
     render(<App />);
-    await screen.findByText("Setup needed");
+    const setup = await screen.findByRole("region", { name: "Setup needed" });
+    expect(within(setup).getByText("Finish setup to use Relight.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await userEvent.click(within(setup).getByRole("button", { name: "Open setup" }));
     expect(
       screen.getByRole("dialog", { name: "Studio settings" }),
     ).toBeInTheDocument();
@@ -564,7 +574,7 @@ describe("Relight studio", () => {
     expect(screen.getByAltText("Result: relit.png")).toHaveStyle({
       clipPath: "inset(0 0 0 72%)",
     });
-    expect(screen.getByRole("link", { name: /Download/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
       "download",
       "relit.png",
     );

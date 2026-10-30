@@ -78,9 +78,11 @@ Tools share files, and setup reuses files ComfyUI already has. Each file is down
 
 1. **Start ComfyUI.** Install [ComfyUI Desktop](https://comfy.org/download) or use an existing [portable/manual installation](https://docs.comfy.org/installation/system_requirements). Confirm its editor opens in your browser and leave it running.
 2. **[Open MarcoStudio](https://neomarcopolo.co/marcostudio/) and connect.** Allow local-network access if your browser asks. Setup checks the models and nodes for your selected tool.
-3. **Finish the missing requirements, then open the studio.** Install models from setup; **Models and nodes** lists anything that needs attention. Completed steps are skipped on your next visit.
+3. **Finish the missing requirements, then open the studio.** Select the missing models you want, review their sizes and confirm before downloading. **Models and nodes** lists other requirements. Completed steps are skipped on your next visit.
 
 Your browser connects directly to your ComfyUI. The website needs no MarcoStudio server or proxy, and your media stays between your browser and ComfyUI.
+
+While MarcoStudio is open and visible, in-app notifications confirm a connection and report observed model-download completions or failures and generation-task failures. Elapsed times are shown only when known; download times are measured through the point the browser observes the outcome. Existing error details remain available after the popup.
 
 <details>
 <summary>ComfyUI is running, but the website cannot connect</summary>
@@ -109,11 +111,13 @@ For a locally hosted MarcoStudio, copy the option shown by that page's setup scr
 <summary>Models, custom nodes, and another ComfyUI address</summary>
 
 - Setup checks Relight first by default; other tools are checked when selected.
-- Automatic model downloads use **ComfyUI-Manager 4**. Setup shows download sizes, reuses matching files, and writes to ComfyUI's configured model folders. Without Manager, already installed tools still work.
+- Automatic model downloads use **ComfyUI-Manager 4**. Setup shows each missing file and the selected total before confirmation, reuses matching files, and writes to ComfyUI's configured model folders. Download progress reports completed files and elapsed time when available; Manager does not provide a byte-level percentage or time remaining to the browser. Check free space on the ComfyUI machine, including room for temporary files. Without Manager, already installed tools still work.
 - Custom node installation is currently manual. Update built-in nodes through ComfyUI. Restyle Video, Motion Control and Replace Person also need MarcoStudio's video nodes: download them from **Models and nodes**. They are not yet in the Comfy registry. Restart ComfyUI when idle after installing nodes.
 - FastH3 OmniRef needs [ComfyUI's PDD support](https://github.com/Comfy-Org/ComfyUI/commit/ce42de5f64ac1d421e304ab7b6c0b3d2f0dde1f6). Setup checks the running implementation.
 - Connection checks local ports **8188** and **8000**. Use **Change address** for another port or machine. On a phone, use the address that opens ComfyUI from that phone.
-- Readiness checks node contracts and model names. The Python CLI's `doctor --verify-hashes` also verifies model file checksums.
+- Readiness checks node contracts, model names, and the Manager queue when available. An active queue blocks readiness, including unrelated Manager tasks. An interrupted or corrupt file can still appear under its expected name after the queue becomes idle; the browser does not verify checksums. The Python CLI's `doctor --verify-hashes` also verifies model file checksums. Manager's queue check is not atomic across separate browser profiles, so simultaneous download requests can still race.
+
+For an optional basic check, **Try a sample** offers an image and a small ComfyUI workflow. The workflow loads and saves the image; it tests image input and output, not model inference, and runs only when you choose to run it in ComfyUI. The sample image is attributed to Get Craver.
 
 Setup never restarts ComfyUI or submits a generation.
 

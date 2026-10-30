@@ -5,3 +5,4 @@
 # Preserve bundled fonts and node archives byte-for-byte.
 *.woff2 binary
 *.zip binary
+*.jpg binary
