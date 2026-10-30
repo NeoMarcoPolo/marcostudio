@@ -82,6 +82,7 @@ main { padding: 0 16px 16px; }
 .setup-banner strong { color: #ffdc91; font-size: 14px; }
 .setup-banner span { color: #e4d8c4; font-size: 13px; }
 .setup-banner button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 38px; padding: 7px 13px; border: 1px solid #c7a95e; background: #e3c277; color: #211b10; font-weight: 650; }
+.setup-banner button:hover:not(:disabled) { background: #f0d18b; border-color: #f0d18b; color: #211b10; }
 .setup-banner button:focus-visible { outline: 2px solid #fff0bd; outline-offset: 3px; }
 .setup-banner ~ .studio-grid { height: calc(100dvh - 190px); }
 .studio-grid {
