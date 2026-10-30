@@ -82,6 +82,8 @@ Tools share files, and setup reuses files ComfyUI already has. Each file is down
 
 Your browser connects directly to your ComfyUI. The website needs no MarcoStudio server or proxy, and your media stays between your browser and ComfyUI.
 
+While MarcoStudio is open and visible, in-app notifications confirm a connection and report observed model-download completions or failures and generation-task failures. Elapsed times are shown only when known; download times are measured through the point the browser observes the outcome. Existing error details remain available after the popup.
+
 <details>
 <summary>ComfyUI is running, but the website cannot connect</summary>
 
