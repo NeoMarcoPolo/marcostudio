@@ -76,6 +76,7 @@ describe("model download consent", () => {
   it("shows sizes and submits only the explicitly selected and confirmed model", async () => {
     const user = userEvent.setup(); render(<Onboarding {...props()} />);
     await waitFor(() => expect(screen.getByRole("checkbox", {name: /Select first/})).toBeInTheDocument());
+    expect(screen.getByText(/Available disk space cannot be checked here/)).toBeVisible();
     expect(screen.getByText(/2.0 GB/)).toBeInTheDocument(); expect(screen.getByText(/3.0 GB/)).toBeInTheDocument();
     const button = screen.getByRole("button", {name: "Download selected"}); expect(button).toBeDisabled();
     await user.click(screen.getByRole("checkbox", {name: /Select first/})); expect(button).toBeDisabled();

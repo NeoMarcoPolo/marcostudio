@@ -261,7 +261,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {pendingDownloads && reviewModels && <button className="setup-back" onClick={() => setReviewModels(false)}>← Back to download progress</button>}
         {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
           <h3 id="missing-models-title">Missing models</h3>
-          <p>Downloads use space on the computer running ComfyUI. Check that it has enough free space, including extra room for temporary files.</p>
+          <p>Available disk space cannot be checked here. Check the drive where ComfyUI stores models, including extra room for temporary files.</p>
           {!pendingDownloads && manager && toInstall.length > 0 && <label className="model-select-all"><input type="checkbox" checked={allSelected} disabled={installing || checking}
             onChange={event => { setSelected(event.target.checked ? toInstall.map(model => model.url) : []); setConfirmed(""); }}/> Select all available downloads</label>}
           <ul>{missing.map(model => {
