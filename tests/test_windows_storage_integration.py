@@ -1,6 +1,7 @@
-"""Exercise the disconnected Windows prototype as one authenticated flow."""
+"""Exercise the opt-in Windows storage integration on a real Windows runner."""
 import asyncio
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -28,20 +29,22 @@ def load(name):
 @pytest.mark.skipif(os.name != "nt", reason="requires an actual Windows runner")
 def test_windows_owner_pairing_authenticates_real_destination_space(tmp_path, monkeypatch):
     pairing_module = load("storage_pairing_windows")
-    storage_module = load("model_storage_windows")
+    load("model_storage_windows")
+    storage_module = load("model_storage")
     routes = load("storage_routes")
     destination = tmp_path / "models"
     destination.mkdir()
     identity = "c" * 64
     monkeypatch.setattr(routes, "MODELS", {identity: ("model.safetensors", "vae")})
 
-    def probe(_filename, _model_type):
-        result = storage_module.available_windows(destination)
-        assert result is not None
-        free, device = result
-        return SimpleNamespace(status="available", available_bytes=free, device=device)
-
-    monkeypatch.setattr(routes, "manager_default_space", probe)
+    constants = ModuleType("comfyui_manager.glob.constants")
+    constants.model_dir_name_map = {"vae": "vae"}
+    resolver = ModuleType("comfyui_manager.glob.utils.model_utils")
+    resolver.get_model_dir = lambda _data: str(destination)
+    monkeypatch.setitem(sys.modules, "comfyui_manager.glob.constants", constants)
+    monkeypatch.setitem(sys.modules, "comfyui_manager.glob.utils.model_utils", resolver)
+    monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE", "1")
+    monkeypatch.setattr(routes, "manager_default_space", storage_module.manager_default_space)
     owner = pairing_module.WindowsOwnerPairing()
     try:
         token = pairing_module.read_owner_token(owner.target)
@@ -68,3 +71,57 @@ def test_windows_owner_pairing_authenticates_real_destination_space(tmp_path, mo
         asyncio.run(run())
     finally:
         owner.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires an actual Windows runner")
+def test_windows_storage_integration_requires_explicit_opt_in(tmp_path, monkeypatch):
+    load("model_storage_windows")
+    storage_module = load("model_storage")
+    monkeypatch.delenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE", raising=False)
+    assert storage_module.available_space(tmp_path).status == "unavailable"
+    monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE", "1")
+    assert storage_module.available_space(tmp_path).status == "available"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires an actual Windows runner")
+def test_windows_capability_registers_only_after_explicit_opt_in(monkeypatch):
+    package = "marcostudio_windows_registration_test"
+    h3 = ModuleType(f"{package}.h3")
+    h3.MarcoStudioH3Window = object
+    h3.MarcoStudioH3InpaintLatent = object
+    monkeypatch.setitem(sys.modules, h3.__name__, h3)
+    owners = []
+    route_table = []
+
+    class Routes:
+        def __iter__(self):
+            return iter([])
+
+        def get(self, path):
+            def register(handler):
+                route_table.append((path, handler))
+                return handler
+            return register
+
+    instance = SimpleNamespace(routes=Routes())
+    server = SimpleNamespace(PromptServer=SimpleNamespace(instance=instance))
+    monkeypatch.setitem(sys.modules, "server", server)
+    monkeypatch.setenv("MARCOSTUDIO_ENABLE_STORAGE_PAIRING", "1")
+    monkeypatch.delenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE", raising=False)
+    monkeypatch.setattr("atexit.register", lambda func: owners.append(func))
+    spec = importlib.util.spec_from_file_location(package, ROOT / "__init__.py",
+                                                  submodule_search_locations=[str(ROOT)])
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, package, module)
+    spec.loader.exec_module(module)
+    assert [path for path, _ in route_table] == ["/marcostudio/capabilities"]
+    assert json.loads(asyncio.run(route_table[-1][1](None)).text)["storage_pairing"] == 0
+    route_table.clear()
+    monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE", "1")
+    module._register_routes()
+    try:
+        assert [path for path, _ in route_table] == ["/marcostudio/storage", "/marcostudio/capabilities"]
+        assert json.loads(asyncio.run(route_table[-1][1](None)).text)["storage_pairing"] == 1
+    finally:
+        for close in owners:
+            close()

@@ -48,13 +48,25 @@ def _register_routes():
     pairing = None
     if os.environ.get("MARCOSTUDIO_ENABLE_STORAGE_PAIRING") == "1":
         try:
-            from .storage_pairing import OwnerPairing
             from .storage_routes import storage_handler
-            pairing = OwnerPairing()
+            if os.name == "nt":
+                if os.environ.get("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE") != "1":
+                    raise RuntimeError("Windows storage pairing requires experimental opt-in")
+                from .storage_pairing_windows import WindowsOwnerPairing
+
+                pairing = WindowsOwnerPairing()
+                location = pairing.target
+                label = "credential target"
+            else:
+                from .storage_pairing import OwnerPairing
+
+                pairing = OwnerPairing()
+                location = pairing.path
+                label = "socket"
             atexit.register(pairing.close)
             instance.routes.get("/marcostudio/storage")(storage_handler(pairing))
-            # The socket path is not a secret; only the owner-local CLI sees the token.
-            logging.info("MarcoStudio storage pairing socket: %s", pairing.path)
+            # The socket path or credential target is not the pairing secret.
+            logging.info("MarcoStudio storage pairing %s: %s", label, location)
         except (ImportError, OSError, RuntimeError):
             logging.warning("MarcoStudio storage pairing unavailable")
 

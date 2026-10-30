@@ -24,3 +24,26 @@ Loopback HTTP and direct HTTPS are supported by the helper. The browser may
 require local-network permission. Never send the secret to a remote plain HTTP
 address. Pairing protects only the MarcoStudio storage helper, not other
 ComfyUI endpoints.
+
+## Experimental Windows terminal launch
+
+Windows pairing is off by default. Its disk and credential APIs have automated
+Windows runner coverage, but the ComfyUI Desktop and portable launch flows are
+not yet verified. Only opt in if you control the ComfyUI process and can run a
+terminal in the same Windows user logon session. If pairing or the model's
+destination cannot be checked, use the manual free-space check instead.
+
+In the PowerShell session used to start ComfyUI, set both environment variables
+before your usual launch command:
+
+```powershell
+$env:MARCOSTUDIO_ENABLE_STORAGE_PAIRING = "1"
+$env:MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE = "1"
+```
+
+After starting ComfyUI, find `MarcoStudio storage pairing credential target:`
+in its log. In a separate owner terminal in the same Windows logon session, run
+`<comfy-python> custom_nodes/marcostudio/storage_pairing_windows.py <credential-target>`.
+The target is not the secret; the command prints the secret, which may remain
+in terminal scrollback. Restarting ComfyUI rotates and removes the old session
+credential. Do not paste the code anywhere except MarcoStudio's pairing field.

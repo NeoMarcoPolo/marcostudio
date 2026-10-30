@@ -26,8 +26,16 @@ def available_space(destination: Path) -> StorageSpace:
     is not a directory, or is a dangling symlink. Failure is deliberately coarse
     so callers cannot accidentally disclose a local path or operating-system error.
     """
-    if (not isinstance(destination, Path) or not destination.is_absolute()
-            or ".." in destination.parts or os.name != "posix"
+    if not isinstance(destination, Path) or not destination.is_absolute() or ".." in destination.parts:
+        return StorageSpace("unavailable")
+    if os.name == "nt":
+        if os.environ.get("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE") != "1":
+            return StorageSpace("unavailable")
+        from .model_storage_windows import available_windows
+
+        result = available_windows(destination)
+        return StorageSpace("available", *result) if result is not None else StorageSpace("unavailable")
+    if (os.name != "posix"
             or not hasattr(os, "fstatvfs")
             or not (hasattr(os, "O_DIRECTORY") or hasattr(os, "O_NONBLOCK"))):
         return StorageSpace("unavailable")

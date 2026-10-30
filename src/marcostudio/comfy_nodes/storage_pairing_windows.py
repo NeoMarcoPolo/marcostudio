@@ -82,3 +82,11 @@ class WindowsOwnerPairing:
             if not self._manager.CredDeleteW(self.target, 1, 0):
                 raise OSError(ctypes.get_last_error(), "Windows pairing credential removal failed")
             self._closed = True
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) != 2:
+        raise SystemExit("Usage: python storage_pairing_windows.py <credential-target>")
+    print(read_owner_token(sys.argv[1]))
