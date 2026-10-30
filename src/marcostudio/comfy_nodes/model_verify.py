@@ -51,6 +51,120 @@ def supports_identity_cache() -> bool:
     return False
 
 
+def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size):
+    """Hash a local NTFS file while write and delete opens are excluded.
+
+    This is a historical observation, not a future-load guarantee. Windows
+    sharing checks do not prove that previously created writable mappings cannot
+    alter bytes. File metadata and the trusted digest are checked while the
+    read handle remains open; callers must never reuse the result as a cache.
+    """
+    import ctypes
+    import re
+    from ctypes import wintypes
+
+    if not hasattr(ctypes, "WinDLL"):
+        return Verification("unavailable")
+    import msvcrt
+
+    class BasicInfo(ctypes.Structure):
+        _fields_ = [("creation", ctypes.c_longlong), ("access", ctypes.c_longlong),
+                    ("write", ctypes.c_longlong), ("change", ctypes.c_longlong),
+                    ("attributes", wintypes.DWORD)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                   wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    kernel.GetFinalPathNameByHandleW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+    kernel.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+    kernel.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
+    kernel.GetDriveTypeW.restype = wintypes.UINT
+    kernel.GetVolumeInformationW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD,
+                                              wintypes.LPVOID, wintypes.LPVOID, wintypes.LPVOID,
+                                              wintypes.LPWSTR, wintypes.DWORD]
+    kernel.GetVolumeInformationW.restype = wintypes.BOOL
+    kernel.GetFileType.argtypes = [wintypes.HANDLE]
+    kernel.GetFileType.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel.CreateFileW(str(path), 0x80000000, 1, None, 3, 0x08000000, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        return Verification("missing" if ctypes.get_last_error() in (2, 3) else "unavailable")
+    descriptor = None
+    owns_native = True
+    try:
+        if kernel.GetFileType(handle) != 1:
+            return Verification("unavailable")
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = kernel.GetFinalPathNameByHandleW(handle, buffer, len(buffer), 1)
+        match = re.match(r"^(\\\\\?\\Volume\{[0-9a-fA-F-]+\}\\)", buffer.value) if length and length < len(buffer) else None
+        if not match or kernel.GetDriveTypeW(match.group(1)) != 3:
+            return Verification("unavailable")
+        filesystem = ctypes.create_unicode_buffer(256)
+        if not kernel.GetVolumeInformationW(match.group(1), None, 0, None, None, None, filesystem, len(filesystem)):
+            return Verification("unavailable")
+        if filesystem.value.upper() != "NTFS":
+            return Verification("unavailable")
+
+        def basic():
+            value = BasicInfo()
+            if not kernel.GetFileInformationByHandleEx(handle, 0, ctypes.byref(value), ctypes.sizeof(value)):
+                return None
+            return value.creation, value.write, value.change, value.attributes
+
+        initial = path.stat()
+        initial_basic = basic()
+        if not stat.S_ISREG(initial.st_mode) or initial_basic is None:
+            return Verification("unavailable")
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        owns_native = False  # Ownership transferred to the Python descriptor.
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            handle = msvcrt.get_osfhandle(stream.fileno())
+            opened = os.fstat(stream.fileno())
+            if _identity(initial) != _identity(opened):
+                return Verification("changed")
+            if opened.st_size != expected_size:
+                return Verification("size_mismatch")
+            hasher = hashlib.sha256()
+            read_size = 0
+            while read_size < expected_size:
+                if cancelled is not None and cancelled():
+                    return Verification("cancelled")
+                chunk = stream.read(min(chunk_size, expected_size - read_size))
+                if not chunk:
+                    break
+                read_size += len(chunk)
+                hasher.update(chunk)
+            if cancelled is not None and cancelled():
+                return Verification("cancelled")
+            extra = stream.read(1)
+            final = os.fstat(stream.fileno())
+            current = path.stat()
+            final_basic = basic()
+            if (_identity(opened) != _identity(final) or _identity(final) != _identity(current)
+                    or initial_basic != final_basic or final_basic is None or read_size != expected_size or extra):
+                return Verification("changed")
+            if not hmac.compare_digest(hasher.hexdigest(), expected_sha256):
+                return Verification("hash_mismatch")
+            if cancelled is not None and cancelled():
+                return Verification("cancelled")
+            return Verification("verified", _identity(final))
+    except FileNotFoundError:
+        return Verification("missing")
+    except OSError:
+        return Verification("unavailable")
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        elif owns_native:
+            kernel.CloseHandle(handle)
+
+
 def verify_file(
     path: Path,
     expected_size: int,
@@ -75,11 +189,8 @@ def verify_file(
         or chunk_size <= 0
     ):
         return Verification("invalid_metadata")
-    # Windows metadata can remain unchanged during a write to an open file.
-    # Until a Windows handle-based change guard is validated, never publish a
-    # successful verification from this primitive there.
     if os.name == "nt":
-        return Verification("unavailable")
+        return _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size)
     try:
         initial = path.stat()
         if not stat.S_ISREG(initial.st_mode):
