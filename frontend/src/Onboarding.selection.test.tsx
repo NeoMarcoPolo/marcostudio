@@ -7,7 +7,7 @@ import type { Doctor } from "./api";
 const manager = vi.hoisted(() => ({ start: vi.fn(), available: vi.fn(), tasks: vi.fn() }));
 vi.mock("./browser/manager", () => ({
   canInstall: () => true, installTasks: manager.tasks, managerAvailable: manager.available,
-  reconcileInstalls: async () => [], resumeDownloads: vi.fn(), startDownloads: manager.start,
+  reconcileInstalls: async () => manager.tasks(), resumeDownloads: vi.fn(), startDownloads: manager.start,
 }));
 vi.mock("./browser/connection", () => ({
   CONNECTION_DRAFT_KEY: "draft", endpoint: () => "http://127.0.0.1:8192",
@@ -62,6 +62,27 @@ describe("model download consent", () => {
     expect(screen.getByText("Queue busy")).toBeInTheDocument();
     expect(screen.getByRole("button", {name: "Download selected"})).toBeDisabled();
     expect(screen.getByRole("checkbox", {name: /I confirm downloading/})).not.toBeChecked();
+    expect(manager.start).not.toHaveBeenCalled();
+  });
+  it("prioritizes unresolved batches over newer finished work and lets users review models without submitting", async () => {
+    const user = userEvent.setup();
+    const pending = {id: "old-pending", model: models[0], state: "queued", batchId: "a", submittedAt: Date.now()};
+    const other = {id: "other-pending", model: models[1], state: "unknown", batchId: "b", submittedAt: Date.now()};
+    const complete = {id: "newer-completed", model: models[0], state: "succeeded", batchId: "c", submittedAt: Date.now(), observedFinishedAt: Date.now()};
+    manager.tasks.mockReturnValue([pending, other, complete]);
+    render(<Onboarding {...props()} />);
+    await waitFor(() => expect(screen.getByRole("combobox", {name: "Download batch"})).toBeInTheDocument());
+    const picker = screen.getByRole("combobox", {name: "Download batch"});
+    expect(picker).toHaveValue("batch:a");
+    expect(screen.getByText("Queued or downloading in ComfyUI.")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", {name: /Select first/})).not.toBeInTheDocument();
+    await user.selectOptions(picker, "batch:b");
+    expect(screen.getByText("Waiting for ComfyUI to confirm the request.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", {name: "Review missing models"}));
+    expect(screen.getByText("first.safetensors")).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "Download selected"})).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", {name: /Back to download progress/}));
+    expect(screen.getByRole("combobox", {name: "Download batch"})).toHaveValue("batch:b");
     expect(manager.start).not.toHaveBeenCalled();
   });
 });

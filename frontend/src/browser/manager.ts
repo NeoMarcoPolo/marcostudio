@@ -8,7 +8,7 @@ const ROOT = "/v2/manager/queue";
 // Categories without a supported mapping use manual downloads, never models/etc.
 const types: Record<string, string> = {diffusion_models: "diffusion_model", text_encoders: "text_encoders", vae: "vae", loras: "lora", controlnet: "controlnet"};
 export const canInstall = (model: Model) => !!types[model.category];
-export interface InstallTask {id: string; model: Model; state: "submitting" | "queued" | "succeeded" | "failed" | "unknown"; error?: string; sawMissingFile?: boolean}
+export interface InstallTask {id: string; model: Model; state: "submitting" | "queued" | "succeeded" | "failed" | "unknown"; error?: string; sawMissingFile?: boolean; batchId?: string; submittedAt?: number; observedFinishedAt?: number}
 interface Status {total_count: number; in_progress_count: number; pending_count: number; is_processing: boolean}
 interface TaskResult {ui_id: string; result: string; status?: {status_str: string; completed: boolean; messages: string[]}}
 interface BatchOperation {operation_id: string; result: string; client_id?: string; error_message?: string; end_time?: string}
@@ -54,6 +54,7 @@ export async function reconcileInstalls(address = endpoint()) {
     const result = data && ("ui_id" in data ? data as TaskResult : (data as Record<string, TaskResult>)[task.id]);
     if (!result?.status?.completed) { unresolved.push(task); continue; }
     task.state = ["success", "skipped", "skip"].includes(result.status.status_str) ? "succeeded" : "failed";
+    task.observedFinishedAt ??= Date.now();
     if (task.state === "failed") console.warn("ComfyUI model download failed; see ComfyUI logs for details.");
     task.error = task.state === "failed" ? failureGuidance(result.status.messages?.join("; ") || result.result) : undefined;
   }
@@ -75,6 +76,7 @@ export async function reconcileInstalls(address = endpoint()) {
             const task = unresolved.find(task => task.id === operation.operation_id);
             if (!task || !operation.end_time || (operation.client_id && operation.client_id !== clientId())) continue;
             task.state = ["success", "skipped", "skip"].includes(operation.result) ? "succeeded" : "failed";
+            task.observedFinishedAt ??= Date.now();
             if (task.state === "failed") console.warn("ComfyUI model download failed; see ComfyUI logs for details.");
             task.error = task.state === "failed" ? failureGuidance(operation.error_message) : undefined;
           }
@@ -108,10 +110,12 @@ async function installModels(address: string, models: Model[]) {
   if (status.pending_count > 0 || status.in_progress_count > 0 || status.is_processing)
     throw new Error("ComfyUI Manager has setup tasks in progress. Wait for its queue to finish, then try again.");
   let queued = false;
+  const batchId = crypto.randomUUID();
+  const submittedAt = Date.now();
   for (const model of unique) {
     if (!canInstall(model)) continue;
     if (tasks.some(task => task.model.url === model.url && !["failed", "succeeded"].includes(task.state))) continue;
-    const task: InstallTask = {id: crypto.randomUUID(), model, state: "submitting"};
+    const task: InstallTask = {id: crypto.randomUUID(), model, state: "submitting", batchId, submittedAt};
     tasks.push(task); saveInstallTasks(address, [task]);
     try {
       await send(address, `${ROOT}/install_model`, {name: model.filename, filename: model.filename,
@@ -119,6 +123,7 @@ async function installModels(address: string, models: Model[]) {
       task.state = "queued"; queued = true;
     } catch (error) {
       task.state = error instanceof ServiceError && !error.uncertain ? "failed" : "unknown";
+      if (task.state === "failed") task.observedFinishedAt = Date.now();
       if (task.state === "failed") console.warn("ComfyUI model download request failed; see ComfyUI logs for details.");
       task.error = task.state === "failed" ? downloadFailure : error instanceof Error ? error.message : "Couldn't confirm this download.";
     }

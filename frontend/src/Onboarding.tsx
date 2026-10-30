@@ -10,6 +10,43 @@ import type { Requirements } from "./browser/requirements";
 export const enteredKey = () => `marcostudio.entered:${endpoint()}`;
 const formatSize = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
+export function DownloadProgress({tasks, active, installing, resume}: {
+  tasks: InstallTask[]; active: InstallTask; installing: boolean; resume: () => void;
+}) {
+  const [now, setNow] = useState(Date.now);
+  const batch = active.batchId ? tasks.filter(task => task.batchId === active.batchId) : [];
+  const unfinished = (batch.length ? batch : [active]).filter(task => !["succeeded", "failed"].includes(task.state));
+  const pending = unfinished.length > 0;
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [pending]);
+  // Older saved tasks have no batch identity or timestamp. Never invent either.
+  const completed = batch.filter(task => task.state === "succeeded").length;
+  const failed = batch.filter(task => task.state === "failed").length;
+  const submittedAt = active.submittedAt;
+  const finishTimes = batch.length ? batch.map(task => task.observedFinishedAt) : [active.observedFinishedAt];
+  const finishTime = !pending && finishTimes.every(time => typeof time === "number" && Number.isFinite(time))
+    ? Math.max(...finishTimes as number[]) : undefined;
+  const end = pending ? now : finishTime;
+  const elapsed = typeof submittedAt === "number" && Number.isFinite(submittedAt) && submittedAt <= now
+    && typeof end === "number" && end >= submittedAt ? Math.floor((end - submittedAt) / 1000) : undefined;
+  const elapsedText = elapsed === undefined ? "Elapsed time unavailable for this request."
+    : `${pending ? "Elapsed since request" : "Time until completion observed"}: ${Math.floor(elapsed / 3600) > 0 ? `${Math.floor(elapsed / 3600)}h ` : ""}${Math.floor(elapsed % 3600 / 60)}m ${elapsed % 60}s`;
+  return <section className="install-status" aria-label="Download progress">
+    {batch.length > 0 ? <>
+      <p>{completed} of {batch.length} tracked files completed{failed > 0 ? ` · ${failed} failed` : ""}</p>
+      <progress max={batch.length} value={completed} aria-label="Files completed"/>
+    </> : <><p>{pending ? "Checking download status" : active.state === "succeeded" ? "Download completed" : "Download failed"}</p>{pending && <progress aria-label="Download status"/>}</>}
+    {pending && <p>{unfinished.some(task => task.state === "unknown" || task.state === "submitting")
+      ? "Waiting for ComfyUI to confirm the request." : "Queued or downloading in ComfyUI."}</p>}
+    <p>{elapsedText}</p>
+    {pending && <><p>File percentage and remaining time are not available from ComfyUI Manager.</p>
+      <button disabled={installing} onClick={resume}>Resume downloads</button></>}
+  </section>;
+}
+
 export function Onboarding({feature, featureId, doctor, checking, locked, refresh, connected, close}: {
   feature?: Feature; featureId: FeatureId; doctor?: Doctor; checking: boolean; locked: boolean;
   refresh: () => Promise<void>; connected: () => Promise<void>; close: () => void;
@@ -26,6 +63,8 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const [selected, setSelected] = useState<string[]>([]);
   const [confirmed, setConfirmed] = useState("");
   const [view, setView] = useState<"setup" | "requirements" | "connection" | string>("setup");
+  const [reviewModels, setReviewModels] = useState(false);
+  const [activeBatch, setActiveBatch] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const polling = useRef(false);
@@ -34,6 +73,12 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const missing = report?.model_requirements?.filter(model => !model.available) ?? [];
   const downloadable = missing.filter(model => model.installable && canInstall(model));
   const unfinished = tasks.filter(task => missing.some(model => model.url === task.model.url) && !["failed", "succeeded"].includes(task.state));
+  const relevantTasks = tasks.filter(task => report?.model_requirements?.some(model => model.url === task.model.url));
+  const batchKey = (task: InstallTask) => task.batchId ? `batch:${task.batchId}` : `task:${task.id}`;
+  const pendingBatches = [...new Map(relevantTasks.filter(task => !["failed", "succeeded"].includes(task.state))
+    .map(task => [batchKey(task), task])).values()];
+  const recentTask = pendingBatches.find(task => batchKey(task) === activeBatch) ?? pendingBatches[0] ?? relevantTasks.at(-1);
+  const pendingDownloads = pendingBatches.length > 0;
   const toInstall = downloadable.filter(model => !tasks.some(task => task.model.url === model.url && !["failed", "succeeded"].includes(task.state)));
   const queueBlocked = !!report?.checks.some(check => check.name === "manager:queue" && check.status === "fail");
   const eligibleKey = JSON.stringify([endpoint(), queueBlocked, toInstall.map(model => [model.url, model.size] as const).sort(([a], [b]) => a.localeCompare(b))]);
@@ -58,6 +103,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
 
   useEffect(() => { heading.current?.focus(); }, [step, view]);
   useEffect(() => { setConfirmed(""); }, [eligibleKey]);
+  useEffect(() => { if (!pendingDownloads) setReviewModels(false); }, [pendingDownloads]);
 
   const recheck = useCallback(async () => {
     if (!current.current || polling.current || connectionPending.current || connectionHelp || !endpoint()) return;
@@ -160,15 +206,16 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
       </>}
       {view === "setup" && connectedHere && <p className="setup-connected"><Check size={14}/> ComfyUI connected</p>}
       {view === "setup" && step === 1 && <>
-        <p className="requirements-summary">{missing.length > 0 && <span>{missing.length} model{missing.length === 1 ? "" : "s"} missing</span>}{missing.length > 0 && <span> · {formatSize(missing.reduce((total, model) => total + model.size, 0))}</span>}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>
-        {missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
+        {(!pendingDownloads || reviewModels) && <p className="requirements-summary">{missing.length > 0 && <span>{missing.length} model{missing.length === 1 ? "" : "s"} missing</span>}{missing.length > 0 && <span> · {formatSize(missing.reduce((total, model) => total + model.size, 0))}</span>}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>}
+        {pendingDownloads && reviewModels && <button className="setup-back" onClick={() => setReviewModels(false)}>← Back to download progress</button>}
+        {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
           <h3 id="missing-models-title">Missing models</h3>
           <p>Downloads use space on the computer running ComfyUI. Check that it has enough free space, including extra room for temporary files.</p>
-          {manager && toInstall.length > 0 && <label className="model-select-all"><input type="checkbox" checked={allSelected} disabled={installing || checking}
+          {!pendingDownloads && manager && toInstall.length > 0 && <label className="model-select-all"><input type="checkbox" checked={allSelected} disabled={installing || checking}
             onChange={event => { setSelected(event.target.checked ? toInstall.map(model => model.url) : []); setConfirmed(""); }}/> Select all available downloads</label>}
           <ul>{missing.map(model => {
             const queued = tasks.some(task => task.model.url === model.url && !["failed", "succeeded"].includes(task.state));
-            const eligible = manager && toInstall.some(item => item.url === model.url);
+            const eligible = !pendingDownloads && manager && toInstall.some(item => item.url === model.url);
             return <li key={model.key}>
               <div className="model-choice">
                 {eligible ? <label className="model-name"><input type="checkbox" aria-label={`Select ${model.filename}`} checked={selected.includes(model.url)} disabled={installing || checking}
@@ -178,26 +225,28 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
                 <button className="model-details-button" aria-label={`Details for ${model.filename}`} onClick={() => setView(model.url)}>Details</button>
               </div>
               {queued && <span className="model-state">Already queued</span>}
-              {!queued && !eligible && <span className="model-state">{manager ? "Manual download required" : "Enable ComfyUI-Manager for automatic downloads, or download manually"}</span>}
+              {!queued && !eligible && <span className="model-state">{pendingDownloads ? "Available after the current download finishes" : manager ? "Manual download required" : "Enable ComfyUI-Manager for automatic downloads, or download manually"}</span>}
             </li>;
           })}</ul>
-          {manager && toInstall.length > 0 && <>
+          {!pendingDownloads && manager && toInstall.length > 0 && <>
             <p>{chosen.length} selected · {formatSize(selectedSize)}</p>
             <label className="model-confirm"><input type="checkbox" checked={chosen.length > 0 && confirmed === selectionKey} disabled={!chosen.length || installing || checking}
               onChange={event => setConfirmed(event.target.checked ? selectionKey : "")}/> I confirm downloading the selected models to this ComfyUI computer.</label>
           </>}
         </section>}
-        <div className="setup-actions">
+        {!pendingDownloads && <div className="setup-actions">
           {manager && toInstall.length > 0 && <button className="setup-primary" disabled={installing || checking || queueBlocked || !chosen.length || confirmed !== selectionKey} onClick={() => void install()}>{installing ? "Starting…" : "Download selected"}</button>}
           <a href={report?.address} target="_blank" rel="noopener noreferrer">Open ComfyUI <ExternalLink size={13}/></a>
-        </div>
-        {report?.checks.filter(check => check.name === "manager:queue" && check.status === "fail").map(check => <p className="failure-text" role="status" key={check.name}>{check.message}</p>)}
-        {unfinished.length > 0 && <div className="install-status"><p>{unfinished.some(task => task.state === "unknown" || task.state === "submitting") ? "Checking downloads…" : `Waiting for ${unfinished.length} download${unfinished.length === 1 ? "" : "s"}`}</p><button disabled={installing} onClick={() => void install(true)}>Resume downloads</button></div>}
+        </div>}
+        {!reviewModels && report?.checks.filter(check => check.name === "manager:queue" && check.status === "fail").map(check => <p className="failure-text" role="status" key={check.name}>{check.message}</p>)}
+        {!reviewModels && pendingBatches.length > 1 && <label className="batch-picker">Download batch <select value={batchKey(recentTask!)} onChange={event => setActiveBatch(event.target.value)}>{pendingBatches.map((task, index) => <option key={batchKey(task)} value={batchKey(task)}>Batch {index + 1} · {task.model.filename}</option>)}</select></label>}
+        {!reviewModels && recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}
+        {pendingDownloads && !reviewModels && missing.length > 0 && <button className="setup-back" onClick={() => setReviewModels(true)}>Review missing models</button>}
         {tasks.filter(task => task.state === "failed" && missing.some(model => model.url === task.model.url)).map(task => <p className="failure-text" key={task.id}>{task.model.filename}: {task.error}</p>)}
         {tasks.some(task => task.state === "succeeded" && missing.some(model => model.url === task.model.url)) && <p>Downloaded. Restart ComfyUI when idle to load the model.</p>}
-        <div className="setup-secondary"><button onClick={() => setView("requirements")}>Models and nodes</button><button onClick={() => setView("connection")}>Change address</button></div>
+        {!reviewModels && <div className="setup-secondary"><button onClick={() => setView("requirements")}>Models and nodes</button><button onClick={() => setView("connection")}>Change address</button></div>}
       </>}
-      {view === "setup" && step === 2 && <button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button>}
+      {view === "setup" && step === 2 && <>{recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}<button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></>}
       {view === "setup" && step !== 1 && <div className="setup-secondary"><button onClick={() => setView("connection")}>Change address</button></div>}
       {view === "requirements" && <section className="requirement-details">
           {!manager && missing.length > 0 && <p><a href="https://docs.comfy.org/manager" target="_blank" rel="noopener noreferrer">Enable ComfyUI-Manager</a> for automatic downloads, or add the files below.</p>}

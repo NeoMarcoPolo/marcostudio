@@ -49,6 +49,18 @@ describe("download submission queue recheck", () => {
     expect(tasks[0].state).toBe("queued");
     expect(fetch.mock.calls.filter(([input, init]) => String(input).endsWith("/install_model") && init?.method === "POST")).toHaveLength(1);
   });
+  it("persists batch identity and request time for all selected files", async () => {
+    const fetch = installFixture(idle); vi.stubGlobal("fetch", fetch);
+    const models = getFeature("relight").models.flash.slice(0, 2);
+    const start = Date.now();
+    await startDownloads(models);
+    const persisted = installTasks(address);
+    expect(persisted).toHaveLength(2);
+    expect(persisted[0].batchId).toBeTruthy();
+    expect(persisted[1].batchId).toBe(persisted[0].batchId);
+    expect(persisted[0].submittedAt).toBeGreaterThanOrEqual(start);
+    expect(persisted[1].submittedAt).toBe(persisted[0].submittedAt);
+  });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -76,6 +88,7 @@ describe("Manager download failure guidance", () => {
     }}})));
     await reconcileInstalls(address);
     expect(installTasks(address)[0].state).toBe("succeeded");
+    expect(installTasks(address)[0].observedFinishedAt).toEqual(expect.any(Number));
     expect(installTasks(address)[0].error).toBeUndefined();
     expect(console.warn).not.toHaveBeenCalled();
   });
