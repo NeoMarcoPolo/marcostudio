@@ -1,8 +1,8 @@
 # Optional disk-space pairing
 
-The storage helper is opt-in and currently supports POSIX ComfyUI installations
-that the owner starts from a terminal. Windows and ComfyUI Desktop launch flows
-are not yet verified. It reports space on the model destination, not a download
+The storage helper is opt-in and supports POSIX ComfyUI installations
+that the owner starts from a terminal. Windows storage is experimental and
+requires an additional opt-in. ComfyUI Desktop launch flows are not yet verified. It reports space on the model destination, not a download
 guarantee. Installing the node alone does not enable the endpoint.
 
 1. From the ComfyUI directory, restart ComfyUI with
@@ -35,3 +35,26 @@ Manager queue activity or a file identity change. Other programs or weak
 filesystem metadata can hide changes. Check again after an interrupted or
 external download, and do not treat an older match as proof of current bytes.
 Windows checksum checks are currently unavailable.
+
+## Experimental Windows terminal launch
+
+Windows pairing is off by default. Its disk and credential APIs have automated
+Windows runner coverage, but the ComfyUI Desktop and portable launch flows are
+not yet verified. Only opt in if you control the ComfyUI process and can run a
+terminal in the same Windows user logon session. If pairing or the model's
+destination cannot be checked, use the manual free-space check instead.
+
+In the PowerShell session used to start ComfyUI, set both environment variables
+before your usual launch command:
+
+```powershell
+$env:MARCOSTUDIO_ENABLE_STORAGE_PAIRING = "1"
+$env:MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE = "1"
+```
+
+After starting ComfyUI, find `MarcoStudio storage pairing credential target:`
+in its log. In a separate owner terminal in the same Windows logon session, run
+`<comfy-python> custom_nodes/marcostudio/storage_pairing_windows.py <credential-target>`.
+The target is not the secret; the command prints the secret, which may remain
+in terminal scrollback. Restarting ComfyUI rotates and removes the old session
+credential. Do not paste the code anywhere except MarcoStudio's pairing field.

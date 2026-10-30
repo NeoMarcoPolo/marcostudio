@@ -1,7 +1,7 @@
 """Experimental session-scoped Windows Credential Manager pairing primitive.
 
-This module is not wired to the helper routes. It is usable only after actual
-Windows session isolation and Desktop/portable compatibility are verified.
+This is wired only when the explicit experimental Windows storage opt-in is
+set. Desktop/portable and cross-session compatibility remain unverified.
 """
 import ctypes
 import hmac
@@ -72,13 +72,22 @@ class WindowsOwnerPairing:
         self._closed = False
 
     def accepts(self, token):
-        return isinstance(token, str) and token.isascii() and hmac.compare_digest(token, self._token)
+        return not self._closed and isinstance(token, str) and token.isascii() and hmac.compare_digest(token, self._token)
 
     def volume(self, device):
         return hmac.new(self._token.encode("ascii"), str(device).encode("ascii"), "sha256").hexdigest()[:24]
 
     def close(self):
         if not self._closed:
+            # Revoke endpoint access even if the OS fails to delete the credential.
+            self._closed = True
             if not self._manager.CredDeleteW(self.target, 1, 0):
                 raise OSError(ctypes.get_last_error(), "Windows pairing credential removal failed")
-            self._closed = True
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) != 2:
+        raise SystemExit("Usage: python storage_pairing_windows.py <credential-target>")
+    print(read_owner_token(sys.argv[1]))

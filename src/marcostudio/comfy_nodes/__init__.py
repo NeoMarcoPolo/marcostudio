@@ -46,31 +46,50 @@ def _register_routes():
         return
 
     pairing = None
+    integrity = False
     if os.environ.get("MARCOSTUDIO_ENABLE_STORAGE_PAIRING") == "1":
         try:
-            from .integrity_routes import handlers as integrity_handlers
-            from .storage_pairing import OwnerPairing
             from .storage_routes import storage_handler
-            pairing = OwnerPairing()
+
+            if os.name == "nt":
+                if os.environ.get("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE") != "1":
+                    raise RuntimeError("Windows storage pairing requires experimental opt-in")
+                from .storage_pairing_windows import WindowsOwnerPairing
+
+                pairing = WindowsOwnerPairing()
+                location = pairing.target
+                label = "credential target"
+            else:
+                from .integrity_routes import handlers as integrity_handlers
+                from .storage_pairing import OwnerPairing
+
+                pairing = OwnerPairing()
+                location = pairing.path
+                label = "socket"
+                start, status, cancel = integrity_handlers(pairing)
+                instance.routes.post("/marcostudio/integrity")(start)
+                instance.routes.get("/marcostudio/integrity/{job}")(status)
+                instance.routes.post("/marcostudio/integrity/{job}/cancel")(cancel)
+                integrity = True
             instance.routes.get("/marcostudio/storage")(storage_handler(pairing))
-            start, status, cancel = integrity_handlers(pairing)
-            instance.routes.post("/marcostudio/integrity")(start)
-            instance.routes.get("/marcostudio/integrity/{job}")(status)
-            instance.routes.post("/marcostudio/integrity/{job}/cancel")(cancel)
             atexit.register(pairing.close)
-            # The socket path is not a secret; only the owner-local CLI sees the token.
-            logging.info("MarcoStudio storage pairing socket: %s", pairing.path)
+            # The socket path or credential target is not the pairing secret.
+            logging.info("MarcoStudio storage pairing %s: %s", label, location)
         except (ImportError, OSError, RuntimeError):
             if pairing is not None:
-                pairing.close()
+                try:
+                    pairing.close()
+                except OSError:
+                    logging.warning("MarcoStudio pairing credential cleanup failed")
                 pairing = None
+            integrity = False
             logging.warning("MarcoStudio storage pairing unavailable")
 
     @instance.routes.get(path)
     async def capabilities(request):
         return web.json_response({"version": 1, "h3_pdd": _h3_pdd_capable(),
                                   "storage_pairing": 1 if pairing else 0,
-                                  "integrity_verification": 1 if pairing else 0})
+                                  "integrity_verification": 1 if integrity else 0})
 
 
 _register_routes()

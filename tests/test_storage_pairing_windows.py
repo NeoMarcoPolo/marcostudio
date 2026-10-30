@@ -46,3 +46,30 @@ def test_pairing_sessions_have_distinct_credentials():
     finally:
         first.close()
         second.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires actual Windows")
+def test_owner_cli_reads_target_without_server_logging_secret():
+    owner = pairing.WindowsOwnerPairing()
+    try:
+        child = subprocess.run([sys.executable, str(SOURCE), owner.target],
+                               check=True, capture_output=True, text=True)
+        assert owner.accepts(child.stdout.strip())
+        assert child.stderr == ""
+    finally:
+        owner.close()
+
+
+def test_closed_pairing_never_accepts_old_token():
+    owner = pairing.WindowsOwnerPairing.__new__(pairing.WindowsOwnerPairing)
+    owner._closed = False
+    owner._token = "secret"
+    owner.target = "test-target"
+    class Manager:
+        def CredDeleteW(self, _target, _type, _flags):
+            return True
+    owner._manager = Manager()
+    assert owner.accepts("secret")
+    owner.close()
+    assert not owner.accepts("secret")
+    owner.close()
