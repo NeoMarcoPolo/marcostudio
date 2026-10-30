@@ -23,13 +23,18 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def test_trusted_snapshot_and_invalid_files(tmp_path):
+def test_trusted_snapshot_and_invalid_files(tmp_path, monkeypatch):
     data = b"trusted native fixture"
     path = tmp_path / "model.safetensors"
     assert verify.verify_file(path, len(data), digest(data)).status == "missing"
     path.write_bytes(data)
+    observations = []
+    real = verify._verify_windows
+    def traced(*args):
+        return real(*args, diagnose=observations.append)
+    monkeypatch.setattr(verify, "_verify_windows", traced)
     result = verify.verify_file(path, len(data), digest(data), chunk_size=3)
-    assert result.status == "verified"
+    assert result.status == "verified", {"status": result.status, "observations": observations}
     assert result.identity.size == len(data)
     assert not verify.supports_identity_cache()
     assert verify.verify_file(path, len(data) + 1, digest(data)).status == "size_mismatch"
@@ -94,3 +99,13 @@ def test_windows_checksum_is_disabled_without_explicit_opt_in(tmp_path, monkeypa
     path.write_bytes(b"a")
     monkeypatch.delenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM")
     assert verify.verify_file(path, 1, digest(b"a")).status == "unavailable"
+
+
+def test_repeated_unchanged_files_report_windows_identity_details(tmp_path):
+    data = b"tiny clean fixture repeated"
+    for index in range(30):
+        path = tmp_path / f"model-{index}.safetensors"
+        path.write_bytes(data)
+        observations = []
+        result = verify._verify_windows(path, len(data), digest(data), None, 3, diagnose=observations.append)
+        assert result.status == "verified", {"iteration": index, "status": result.status, "observations": observations}

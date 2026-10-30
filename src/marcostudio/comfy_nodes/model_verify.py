@@ -51,7 +51,7 @@ def supports_identity_cache() -> bool:
     return False
 
 
-def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size):
+def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size, *, diagnose=None):
     """Hash an NTFS file on a fixed-type drive while write/delete opens are excluded.
 
     This is a historical observation, not a future-load guarantee. Windows
@@ -127,6 +127,8 @@ def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size)
             handle = msvcrt.get_osfhandle(stream.fileno())
             opened = os.fstat(stream.fileno())
             if _identity(initial) != _identity(opened):
+                if diagnose is not None:
+                    diagnose({"stage": "open_identity", "equal": False})
                 return Verification("changed")
             if opened.st_size != expected_size:
                 return Verification("size_mismatch")
@@ -148,6 +150,12 @@ def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size)
             final_basic = basic()
             if (_identity(opened) != _identity(final) or _identity(final) != _identity(current)
                     or initial_basic != final_basic or final_basic is None or read_size != expected_size or extra):
+                if diagnose is not None:
+                    diagnose({"stage": "final_identity",
+                              "opened_final_equal": _identity(opened) == _identity(final),
+                              "final_current_equal": _identity(final) == _identity(current),
+                              "basic_fields_equal": [a == b for a, b in zip(initial_basic, final_basic)] if final_basic else None,
+                              "read_size_equal": read_size == expected_size, "extra_byte": bool(extra)})
                 return Verification("changed")
             if not hmac.compare_digest(hasher.hexdigest(), expected_sha256):
                 return Verification("hash_mismatch")
