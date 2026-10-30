@@ -75,6 +75,11 @@ def verify_file(
         or chunk_size <= 0
     ):
         return Verification("invalid_metadata")
+    # Windows metadata can remain unchanged during a write to an open file.
+    # Until a Windows handle-based change guard is validated, never publish a
+    # successful verification from this primitive there.
+    if os.name == "nt":
+        return Verification("unavailable")
     try:
         initial = path.stat()
         if not stat.S_ISREG(initial.st_mode):

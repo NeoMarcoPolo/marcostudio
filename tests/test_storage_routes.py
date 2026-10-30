@@ -20,7 +20,7 @@ spec.loader.exec_module(routes)
 
 
 def test_bundled_catalog_matches_frontend_source():
-    catalog = json.loads((ROOT.parents[2] / "frontend/src/browser/catalog.json").read_text())
+    catalog = json.loads((ROOT.parents[2] / "frontend/src/browser/catalog.json").read_text(encoding="utf-8"))
     categories = {"diffusion_models": "diffusion_model", "text_encoders": "text_encoders", "vae": "vae", "loras": "lora", "controlnet": "controlnet"}
     identities = {}
     for feature in catalog["features"]:

@@ -18,6 +18,7 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_exact_file_verifies_and_returns_matching_identity(tmp_path):
     data = b"trusted model fixture"
     path = tmp_path / "model.safetensors"
@@ -28,6 +29,7 @@ def test_exact_file_verifies_and_returns_matching_identity(tmp_path):
     assert result.identity.inode == path.stat().st_ino
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_truncated_corrupt_and_missing_fail_closed(tmp_path):
     data = b"valid model bytes"
     path = tmp_path / "model.safetensors"
@@ -38,6 +40,7 @@ def test_truncated_corrupt_and_missing_fail_closed(tmp_path):
     assert verify.verify_file(path, len(data), digest(data)).status == "hash_mismatch"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_changed_file_during_read_is_not_verified(tmp_path):
     data = b"0123456789abcdef"
     path = tmp_path / "model.safetensors"
@@ -56,6 +59,7 @@ def test_changed_file_during_read_is_not_verified(tmp_path):
     assert result.identity is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_path_replacement_during_read_is_not_verified(tmp_path):
     data = b"0123456789abcdef"
     path = tmp_path / "model.safetensors"
@@ -76,6 +80,7 @@ def test_path_replacement_during_read_is_not_verified(tmp_path):
     assert result.identity is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_cancelled_and_invalid_catalog_metadata_fail_closed(tmp_path):
     path = tmp_path / "model.safetensors"
     path.write_bytes(b"abc")
@@ -86,6 +91,7 @@ def test_cancelled_and_invalid_catalog_metadata_fail_closed(tmp_path):
     assert verify.verify_file(tmp_path, 3, digest(b"abc")).status == "unavailable"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_cancellation_after_final_read_cannot_return_verified(tmp_path):
     path = tmp_path / "model.safetensors"
     path.write_bytes(b"abc")
@@ -101,6 +107,7 @@ def test_cancellation_after_final_read_cannot_return_verified(tmp_path):
     assert result.identity is None
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_growing_file_never_exceeds_expected_read_bound(tmp_path):
     data = b"0123456789abcdef"
     path = tmp_path / "model.safetensors"
@@ -129,6 +136,15 @@ def test_stat_identity_is_not_a_safe_cache_signal_on_supported_platforms(monkeyp
     assert not verify.supports_identity_cache()
 
 
+def test_windows_file_verification_fails_closed(tmp_path, monkeypatch):
+    path = tmp_path / "model.safetensors"
+    data = b"trusted model fixture"
+    path.write_bytes(data)
+    monkeypatch.setattr(verify, "os", SimpleNamespace(name="nt"))
+    assert verify.verify_file(path, len(data), digest(data)) == verify.Verification("unavailable")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_os_errors_are_coarse_and_do_not_disclose_paths(tmp_path, monkeypatch):
     path = tmp_path / "private-model"
     path.write_bytes(b"abc")
