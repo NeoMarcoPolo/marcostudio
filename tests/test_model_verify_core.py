@@ -136,6 +136,7 @@ def test_stat_identity_is_not_a_safe_cache_signal_on_supported_platforms(monkeyp
     assert not verify.supports_identity_cache()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="simulates missing Windows APIs on a non-Windows host")
 def test_windows_file_verification_fails_closed(tmp_path, monkeypatch):
     path = tmp_path / "model.safetensors"
     data = b"trusted model fixture"
