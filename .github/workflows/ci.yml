@@ -47,6 +47,7 @@ jobs:
       - run: uv run --no-sync python -m pytest -q
       - name: Verify Windows pairing across users on disposable runner
         if: matrix.os == 'windows-latest'
+        timeout-minutes: 5
         env:
           MARCO_EPHEMERAL_WINDOWS_USER_TEST: '1'
         run: uv run --no-sync python tests/windows_cross_user_probe.py
