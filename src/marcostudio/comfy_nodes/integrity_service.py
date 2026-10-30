@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .integrity_check import verify_identity
 from .integrity_loader import resolve_loader_choice
-from .model_verify import Verification, _identity
+from .model_verify import Verification, _identity, supports_identity_cache
 from .verification_worker import VerificationWorker
 
 
@@ -17,8 +17,8 @@ class IntegrityService:
     The queue observer must return exactly ``idle`` when it has authoritatively
     checked the manager; any other value fails closed. Observations at two
     instants cannot prove the queue was idle in between. The result is therefore
-    named snapshot_verified. Consumers must explicitly explain its limits and
-    recheck the snapshot immediately before submitting a generation request.
+    named snapshot_verified. It can be reused only where the filesystem's
+    cache safety is established; otherwise verification remains unavailable.
     """
     def __init__(self, folder_paths, node_mapping, queue_observer, *, cooldown=300, clock=time.monotonic):
         self._folder_paths = folder_paths
@@ -38,6 +38,10 @@ class IntegrityService:
             return False
 
     def submit(self, identity):
+        # No stat-only reuse is known safe for the current filesystem. Do not
+        # spend I/O on a hash that cannot subsequently establish readiness.
+        if not supports_identity_cache():
+            return "unavailable", None
         if not self._idle():
             return "unavailable", None
         result = resolve_loader_choice(identity, self._folder_paths, self._node_mapping)
@@ -53,6 +57,10 @@ class IntegrityService:
         state = self._worker.status(job_id)
         if state != "snapshot_verified":
             return state
+        # Fail closed even if this process previously recorded a successful
+        # hash, e.g. if capability changes before the client reads the job.
+        if not supports_identity_cache():
+            return "unavailable"
         observation = self._worker.observation(job_id)
         if observation is None or not self._idle():
             return "unavailable"

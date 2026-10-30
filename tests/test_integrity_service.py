@@ -25,6 +25,7 @@ def wait_terminal(service, job):
 
 
 def test_queue_unknown_and_changed_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(module, "supports_identity_cache", lambda: True)
     resolved = Resolved("resolved", tmp_path / "model", 4, "a", "model")
     monkeypatch.setattr(module, "resolve_loader_choice", lambda *_: resolved)
     monkeypatch.setattr(module, "verify_identity", lambda *_, **__: Verification("verified"))
@@ -38,6 +39,9 @@ def test_queue_unknown_and_changed_fail_closed(tmp_path, monkeypatch):
 
 
 def test_snapshot_is_not_ready_and_failure_enforces_cooldown(tmp_path, monkeypatch):
+    # Positive control models a separately proven filesystem; production
+    # currently has no such implementation and fails closed.
+    monkeypatch.setattr(module, "supports_identity_cache", lambda: True)
     resolved = Resolved("resolved", tmp_path / "model", 4, "a", "model")
     monkeypatch.setattr(module, "resolve_loader_choice", lambda *_: resolved)
     resolved.path.write_bytes(b"data")
@@ -54,3 +58,18 @@ def test_snapshot_is_not_ready_and_failure_enforces_cooldown(tmp_path, monkeypat
     assert status == "accepted"
     assert wait_terminal(service, job) == "hash_mismatch"
     assert service.submit("a") == ("cooldown", None)
+
+
+def test_unproven_filesystem_never_reuses_hash_or_starts_work(tmp_path, monkeypatch):
+    resolved = Resolved("resolved", tmp_path / "model", 4, "a", "model")
+    monkeypatch.setattr(module, "resolve_loader_choice", lambda *_: resolved)
+    monkeypatch.setattr(module, "supports_identity_cache", lambda: False)
+    calls = []
+    monkeypatch.setattr(module, "verify_identity", lambda *_, **__: calls.append(1))
+    service = module.IntegrityService(None, None, lambda: "idle")
+    assert service.submit("a") == ("unavailable", None)
+    assert calls == []
+    # A previously produced success cannot be replayed after the filesystem
+    # capability becomes unknown or unsupported.
+    monkeypatch.setattr(service._worker, "status", lambda _job: "snapshot_verified")
+    assert service.status("old-job") == "unavailable"

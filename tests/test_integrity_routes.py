@@ -52,6 +52,18 @@ def test_authentication_catalog_and_status():
                 assert response.status == 200
                 assert await response.json() == {"state": "accepted", "job": job}
             assert calls == [identity]
+            async def fragments():
+                import json
+                raw = json.dumps(payload).encode()
+                yield raw[:3]
+                await asyncio.sleep(.01)
+                yield raw[3:17]
+                await asyncio.sleep(.01)
+                yield raw[17:]
+            async with client.post(server.make_url("/start"), data=fragments(),
+                                   headers={**auth, "Content-Type": "application/json"}) as response:
+                assert response.status == 200
+            assert calls == [identity, identity]
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
                 assert await response.json() == {"state": "snapshot_verified"}
             async with client.post(server.make_url("/cancel/" + job), headers=auth) as response:
@@ -87,6 +99,9 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
         def INPUT_TYPES():
             return {"required": {"name": (["model.bin"],)}}
 
+    service_module = sys.modules["route_test_nodes.integrity_service"]
+    # Positive control for the route with a hypothetical proven filesystem.
+    monkeypatch.setattr(service_module, "supports_identity_cache", lambda: True)
     service = module.IntegrityService(Paths(), {"Loader": Loader}, lambda: "idle")
     pairing = SimpleNamespace(accepts=lambda value: value == "correct")
     async def run():
@@ -129,11 +144,13 @@ def test_cancelled_status_does_not_block_loop_or_release_worker_early():
                 assert release.wait(3)
             return "snapshot_verified"
     class Content:
+        done = False
         async def read(self, _n):
             import json
+            self.done = True
             return json.dumps({"id": identity, "catalog": module.catalog_digest()}).encode()
         def at_eof(self):
-            return True
+            return self.done
     auth = {"Authorization": "Bearer correct"}
     request = SimpleNamespace(scheme="http", host="127.0.0.1:8188", remote="127.0.0.1", headers=auth,
                               content_type="application/json", content=Content(), match_info={"job": job})
@@ -155,4 +172,37 @@ def test_cancelled_status_does_not_block_loop_or_release_worker_early():
         release.set()
         assert (await asyncio.wait_for(second, 2)).status == 200
         assert len(calls) == 2
+    asyncio.run(run())
+
+
+def test_fragmented_json_is_accepted_and_oversized_body_rejected():
+    import json
+    identity = next(iter(module.MODELS))
+    payload = json.dumps({"id": identity, "catalog": module.catalog_digest()}).encode()
+    job = "a" * 24
+    calls = []
+    class Service:
+        def submit(self, value):
+            calls.append(value)
+            return "accepted", job
+    class Fragmented:
+        def __init__(self, chunks):
+            self.chunks = list(chunks)
+        async def read(self, n):
+            chunk = self.chunks.pop(0)
+            if len(chunk) > n:
+                self.chunks.insert(0, chunk[n:])
+            return chunk[:n]
+        def at_eof(self):
+            return not self.chunks
+    async def run():
+        start, _status, _cancel = module.handlers(SimpleNamespace(accepts=lambda value: value == "correct"), Service)
+        request = SimpleNamespace(scheme="http", host="127.0.0.1:8188", remote="127.0.0.1",
+                                  headers={"Authorization": "Bearer correct"}, content_type="application/json",
+                                  content=Fragmented([payload[:3], payload[3:17], payload[17:]]))
+        assert (await start(request)).status == 200
+        assert calls == [identity]
+        request.content = Fragmented([b"a" * 1000, b"b" * 1049])
+        assert (await start(request)).status == 400
+        assert calls == [identity]
     asyncio.run(run())

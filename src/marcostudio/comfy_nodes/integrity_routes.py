@@ -48,12 +48,20 @@ def handlers(pairing, service_factory=None):
         if request.content_type != "application/json":
             return None
         try:
-            raw = await request.content.read(2049)
-            if len(raw) > 2048 or not request.content.at_eof():
+            raw = bytearray()
+            async with asyncio.timeout(5):
+                while not request.content.at_eof():
+                    chunk = await request.content.read(2049 - len(raw))
+                    if not chunk:
+                        break
+                    raw.extend(chunk)
+                    if len(raw) > 2048:
+                        return None
+            if not request.content.at_eof():
                 return None
             value = json.loads(raw)
             return value if isinstance(value, dict) else None
-        except (UnicodeDecodeError, ValueError):
+        except (TimeoutError, UnicodeDecodeError, ValueError):
             return None
 
     async def start(request):
