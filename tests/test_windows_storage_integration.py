@@ -131,7 +131,7 @@ def test_windows_capability_registers_only_after_explicit_opt_in(monkeypatch):
         monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM", "1")
         module._register_routes()
         assert [path for path, _ in route_table] == [
-            "/marcostudio/integrity", "/marcostudio/integrity/{job}",
+            "/marcostudio/integrity-failures", "/marcostudio/integrity", "/marcostudio/integrity/{job}",
             "/marcostudio/integrity/{job}/cancel", "/marcostudio/storage", "/marcostudio/capabilities",
         ]
         capabilities = json.loads(asyncio.run(route_table[-1][1](None)).text)

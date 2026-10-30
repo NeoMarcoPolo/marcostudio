@@ -1,14 +1,14 @@
 import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { catalog } from "./catalog";
-import { allowUnverified, allowsUnverified, clearUnverified, currentIntegrityPair, pairIntegrity, unpairIntegrity, verifiedSnapshots, verifyModelSnapshots } from "./integrity";
+import { allowUnverified, allowsUnverified, clearUnverified, currentIntegrityPair, integrityBusy, pairIntegrity, unpairIntegrity, verifiedSnapshots, verifyModelSnapshots } from "./integrity";
 
 const address = "http://127.0.0.1:8196";
 const model = catalog[0].models.flash[0];
 const job = "a".repeat(24);
 beforeEach(() => {
   const values = new Map<string, string>();
-  vi.stubGlobal("localStorage", {getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value)});
+  vi.stubGlobal("localStorage", {getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key)});
   clearUnverified(); unpairIntegrity();
 });
 afterEach(() => { clearUnverified(); unpairIntegrity(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -19,7 +19,7 @@ it("requires a paired verification and rechecks each snapshot before allowing it
   const requests: {url: string; init?: RequestInit}[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     requests.push({url: String(url), init});
-    return new Response(JSON.stringify(String(url).endsWith("/integrity") ? {state: "accepted", job} : {state, checked_at: "2026-10-30T18:00:00+00:00"}), {status: 200});
+    return new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: []} : String(url).endsWith("/integrity") ? {state: "accepted", job} : {state, checked_at: "2026-10-30T18:00:00+00:00"}), {status: 200});
   }));
   expect((await verifiedSnapshots(address, [model])).size).toBe(0);
   pairIntegrity(address, "owner-secret");
@@ -86,4 +86,59 @@ it("keeps a pair across modal lifetimes and clears it on unpair or address chang
   pairIntegrity(address, "owner-secret");
   unpairIntegrity();
   expect(currentIntegrityPair(address)).toBeUndefined();
+});
+
+
+it("invalidates consent when the connection or helper instance changes", async () => {
+  const other = catalog[0].models.flash[4];
+  let instance = "instance_a";
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({version: 1, integrity_verification: 1, integrity_busy: false, integrity_problem: false, integrity_instance: instance}), {status: 200})));
+  await allowUnverified(address, [other]);
+  expect(allowsUnverified(address, other.sha256)).toBe(true);
+  instance = "instance_b";
+  expect((await integrityBusy(address)).state).toBe("idle");
+  expect(allowsUnverified(address, other.sha256)).toBe(false);
+  instance = "instance_a";
+  await integrityBusy(address);
+  expect(allowsUnverified(address, other.sha256)).toBe(false);
+  await allowUnverified(address, [other]);
+  currentIntegrityPair("http://127.0.0.1:8197");
+  currentIntegrityPair(address);
+  expect(allowsUnverified(address, other.sha256)).toBe(false);
+});
+
+it("blocks another tab when the helper recorded an unpolled checksum failure", async () => {
+  const other = catalog[0].models.flash[1];
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({version: 1, integrity_verification: 1, integrity_busy: false, integrity_problem: true, integrity_instance: "instance_a"}), {status: 200})));
+  await expect(allowUnverified(address, [other])).rejects.toThrow(/resolve a failed verification/);
+  expect(allowsUnverified(address, other.sha256)).toBe(false);
+});
+
+it("uses independent persisted keys for distinct model failures", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const first = catalog[0].models.flash[1], second = catalog[0].models.flash[2];
+  const writes = vi.spyOn(localStorage, "setItem");
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: []} : String(url).endsWith("/integrity") ? {state: "accepted", job} : {state: "hash_mismatch"}), {status: 200})));
+  pairIntegrity(address, "owner-secret");
+  await Promise.allSettled([verifyModelSnapshots(address, [first], () => {}), verifyModelSnapshots(address, [second], () => {})]);
+  const keys = writes.mock.calls.map(([key]) => key).filter(key => key.startsWith("marcostudio.integrity.failure.v2:"));
+  expect(new Set(keys).size).toBe(2);
+});
+
+it("lets an authenticated helper failure override an earlier matching job", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const other = catalog[0].models.flash[0];
+  let failed = false;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    const path = String(url);
+    const body = path.includes("/integrity-failures?") ? {failed: failed ? [other.sha256] : []}
+      : path.endsWith("/integrity") ? {state: "accepted", job}
+      : {state: "checksum_matched", checked_at: "2026-10-30T18:00:00+00:00"};
+    return new Response(JSON.stringify(body), {status: 200});
+  }));
+  pairIntegrity(address, "owner-secret");
+  await verifyModelSnapshots(address, [other], () => {});
+  expect((await verifiedSnapshots(address, [other])).has(other.sha256)).toBe(true);
+  failed = true;
+  expect((await verifiedSnapshots(address, [other])).size).toBe(0);
 });

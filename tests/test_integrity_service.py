@@ -34,7 +34,8 @@ def test_queue_unknown_and_changed_fail_closed(tmp_path, monkeypatch):
     service = module.IntegrityService(None, None, lambda: next(states), queue_epoch=lambda: ("queue", 0))
     status, job = service.submit("a")
     assert status == "accepted"
-    assert wait_terminal(service, job) == "unavailable"
+    assert wait_terminal(service, job) == "changed"
+    assert service.has_failure()
 
 
 def test_snapshot_is_not_ready_and_failure_enforces_cooldown(tmp_path, monkeypatch):
@@ -43,12 +44,17 @@ def test_snapshot_is_not_ready_and_failure_enforces_cooldown(tmp_path, monkeypat
     resolved.path.write_bytes(b"data")
     file_identity = module._identity(resolved.path.stat())
     monkeypatch.setattr(module, "verify_identity", lambda *_, **__: Verification("verified", file_identity))
-    service = module.IntegrityService(None, None, lambda: "idle", queue_epoch=lambda: ("queue", 0))
+    now = [100.0]
+    service = module.IntegrityService(None, None, lambda: "idle", queue_epoch=lambda: ("queue", 0), clock=lambda: now[0])
     status, job = service.submit("a")
     assert status == "accepted"
     assert wait_terminal(service, job) == "checksum_matched"
     resolved.path.write_bytes(b"changed")
     assert service.status(job) == "changed"
+    assert service.has_failure()
+    assert service.failed_ids(["a", "other"]) == ["a"]
+    assert service.submit("a") == ("cooldown", None)
+    now[0] += 301
     monkeypatch.setattr(module, "verify_identity", lambda *_, **__: Verification("hash_mismatch"))
     status, job = service.submit("a")
     assert status == "accepted"
@@ -92,7 +98,8 @@ def test_manager_activity_during_hash_cannot_publish_a_match(tmp_path, monkeypat
     service = module.IntegrityService(None, None, lambda: "idle", queue_epoch=lambda: ("queue", epoch[0]))
     accepted, job = service.submit("a")
     assert accepted == "accepted"
-    assert wait_terminal(service, job) == "unavailable"
+    assert wait_terminal(service, job) == "changed"
+    assert service.has_failure()
 
 
 def test_equal_metadata_does_not_change_historical_wording(tmp_path, monkeypatch):

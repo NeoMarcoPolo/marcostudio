@@ -31,10 +31,15 @@ def test_authentication_catalog_and_status():
             return {"state": "checksum_matched", "checked_at": "2026-10-30T18:00:00+00:00"} if value == job else {"state": None}
         def cancel(self, value):
             return value == job
+        def failed_ids(self, values):
+            return [value for value in values if value == identity]
+        def has_failure(self):
+            return True
     async def run():
         app = web.Application()
         start, status, cancel = module.handlers(pairing, Service)
         app.router.add_post("/start", start)
+        app.router.add_get("/failures", start.failures)
         app.router.add_get("/status/{job}", status)
         app.router.add_post("/cancel/{job}", cancel)
         async with TestServer(app) as server, ClientSession() as client:
@@ -64,6 +69,12 @@ def test_authentication_catalog_and_status():
                                    headers={**auth, "Content-Type": "application/json"}) as response:
                 assert response.status == 200
             assert calls == [identity, identity]
+            failure_url = server.make_url("/failures?ids=" + identity + "&catalog=" + module.catalog_digest())
+            async with client.get(failure_url) as response:
+                assert response.status == 401
+            async with client.get(failure_url, headers=auth) as response:
+                assert await response.json() == {"failed": [identity]}
+            assert start.has_failure() is True
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
                 assert await response.json() == {"state": "checksum_matched", "checked_at": "2026-10-30T18:00:00+00:00"}
             async with client.post(server.make_url("/cancel/" + job), headers=auth) as response:
@@ -106,6 +117,7 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
         start, status, _cancel = module.handlers(pairing, lambda: service)
         app.router.add_post("/start", start)
         app.router.add_get("/status/{job}", status)
+        app.router.add_get("/failures", start.failures)
         async with TestServer(app) as server, ClientSession() as client:
             auth = {"Authorization": "Bearer correct"}
             async with client.post(server.make_url("/start"), json={"id": identity, "catalog": module.catalog_digest()}, headers=auth) as response:
@@ -121,6 +133,10 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
             path.write_bytes(b"modified fixture")
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
                 assert (await response.json())["state"] == "changed"
+            assert start.has_failure() is True
+            query = "/failures?ids=" + identity + "&catalog=" + module.catalog_digest()
+            async with client.get(server.make_url(query), headers=auth) as response:
+                assert await response.json() == {"failed": [identity]}
     asyncio.run(run())
 
 

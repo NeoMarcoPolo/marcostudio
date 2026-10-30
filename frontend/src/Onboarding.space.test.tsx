@@ -93,3 +93,10 @@ it("retains pairing across modal close and allows explicit unpair", async () => 
   await user.click(screen.getByRole("button", {name: "Unpair helper"}));
   expect(await screen.findByLabelText("Helper pairing code")).toBeVisible();
 });
+
+
+it("offers helper download even when every model is missing", async () => {
+  calls.integrity.mockResolvedValue(false);
+  render(<Onboarding featureId="relight" doctor={doctor} checking={false} locked={false} refresh={async () => {}} connected={async () => {}} close={() => {}}/>);
+  expect(await screen.findByRole("link", {name: /Download or update MarcoStudio nodes/})).toHaveAttribute("download");
+});

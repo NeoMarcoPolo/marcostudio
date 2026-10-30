@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { canPairStorage, checkStorage, spaceGroups, storageCatalogDigest, supportsStoragePairing } from "./modelSpace";
+import { canPairStorage, checkStorage, spaceGroups, storageCatalogDigest, supportsIntegrityVerification, supportsStoragePairing } from "./modelSpace";
 import type { Model } from "./catalog";
 const model = (id: string, size = 20) => ({sha256: id.repeat(64), size, filename: `${id}.safetensors`} as Model);
 afterEach(() => vi.unstubAllGlobals());
@@ -14,6 +14,12 @@ describe("model destination space", () => {
   it("does not offer pairing without explicit helper capability", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({version: 1, h3_pdd: true}), {status: 200})));
     expect(await supportsStoragePairing("http://127.0.0.1:8188")).toBe(false);
+  });
+  it("treats an outdated integrity helper as unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({version: 1, integrity_verification: 1}), {status: 200})));
+    expect(await supportsIntegrityVerification("http://127.0.0.1:8188")).toBe(false);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({version: 1, integrity_verification: 1, integrity_busy: false, integrity_problem: false, integrity_instance: "instance"}), {status: 200})));
+    expect(await supportsIntegrityVerification("http://127.0.0.1:8188")).toBe(true);
   });
   it("uses bearer authorization, refuses redirects, and validates IDs", async () => {
     const id = "a".repeat(64);

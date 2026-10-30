@@ -5,62 +5,62 @@ import { canPairStorage } from "./modelSpace";
 type Pair = {address: string; token: string};
 type CheckState = "matched" | "unverified" | "blocked" | "active";
 type Job = {id: string; active: boolean};
-const BAD_KEY = "marcostudio.integrity.failures.v1";
+const BAD_PREFIX = "marcostudio.integrity.failure.v2:";
 let persistenceUnsafe = false;
 let paired: Pair | undefined;
-let allowed: {address: string; ids: Set<string>} | undefined;
+let allowed: {address: string; ids: Set<string>; instance?: string} | undefined;
+let observedAddress: string | undefined;
+let observedInstance: {address: string; instance?: string} | undefined;
 const jobs = new Map<string, Job>();
 const memoryBad = new Map<string, string>();
 const keyFor = (address: string, id: string) => JSON.stringify([address, id]);
 const badStates = new Set(["hash_mismatch", "size_mismatch", "changed"]);
+const storageKey = (address: string, id: string) => BAD_PREFIX + encodeURIComponent(address) + ":" + id;
 
-function readBad(): Record<string, string> | null {
-  try {
-    if (persistenceUnsafe) return null;
-    const raw = localStorage.getItem(BAD_KEY);
-    if (!raw) return {};
-    const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== "object" || Array.isArray(value) || Object.values(value).some(item => typeof item !== "string" || !badStates.has(item))) return null;
-    return value as Record<string, string>;
-  } catch { console.warn("Could not read saved model verification failures."); return null; }
-}
 function rememberBad(address: string, id: string, state: string) {
-  const key = keyFor(address, id);
-  memoryBad.set(key, state);
-  const records = readBad();
-  if (!records) return;
-  try { records[key] = state; localStorage.setItem(BAD_KEY, JSON.stringify(records)); }
+  memoryBad.set(keyFor(address, id), state);
+  try { localStorage.setItem(storageKey(address, id), state); }
   catch { persistenceUnsafe = true; console.warn("Could not persist a model verification failure."); }
 }
 function clearBad(address: string, id: string) {
-  const key = keyFor(address, id), records = readBad();
-  if (!records) return;
-  try { delete records[key]; localStorage.setItem(BAD_KEY, JSON.stringify(records)); memoryBad.delete(key); }
+  try { localStorage.removeItem(storageKey(address, id)); memoryBad.delete(keyFor(address, id)); }
   catch { persistenceUnsafe = true; console.warn("Could not clear a saved model verification failure."); }
 }
 function isBad(address: string, id: string): boolean {
-  const records = readBad(), key = keyFor(address, id);
-  return records === null || memoryBad.has(key) || !!records[key];
+  try {
+    if (persistenceUnsafe || memoryBad.has(keyFor(address, id))) return true;
+    const stored = localStorage.getItem(storageKey(address, id));
+    // Any unknown stored value is a failure, not permission to proceed.
+    return stored !== null;
+  } catch { console.warn("Could not read saved model verification failures."); return true; }
 }
 
 // Pairing code and consent are held in page memory only; a reload resets consent.
 export function pairIntegrity(address: string, token: string) {
   if (!canPairStorage(address) || !token) throw new Error("Verification pairing unavailable.");
-  if (paired && (paired.address !== address || paired.token !== token)) unpairIntegrity();
+  if (!paired || paired.address !== address || paired.token !== token) {
+    clearUnverified();
+    if (paired) unpairIntegrity();
+  }
+  observedAddress = address;
   paired = {address, token};
 }
 export function currentIntegrityPair(address: string): Pair | undefined {
+  if (observedAddress !== undefined && observedAddress !== address) clearUnverified();
+  observedAddress = address;
   if (paired && paired.address !== address) unpairIntegrity();
   return paired?.address === address ? paired : undefined;
 }
 export function unpairIntegrity() {
+  clearUnverified();
   paired = undefined;
   // Retain only outstanding jobs to avoid silently bypassing active work.
   for (const [key, job] of jobs) if (!job.active) jobs.delete(key);
 }
 export function clearUnverified() { allowed = undefined; }
-export function allowsUnverified(address: string, id: string): boolean {
-  return allowed?.address === address && allowed.ids.has(id) && !isBad(address, id);
+export function allowsUnverified(address: string, id: string, instance?: string | null): boolean {
+  return allowed?.address === address && allowed.ids.has(id) && !isBad(address, id)
+    && (instance === undefined || allowed.instance === (instance ?? undefined));
 }
 
 async function digestCatalog(): Promise<string> {
@@ -95,10 +95,22 @@ async function status(address: string, token: string, job: string, signal?: Abor
 export async function integrityStates(address: string, models: Model[], signal?: AbortSignal): Promise<Map<string, CheckState>> {
   const states = new Map<string, CheckState>();
   const pair = currentIntegrityPair(address);
+  const remoteFailures = new Set<string>();
+  let failureStateKnown = !pair;
+  if (pair && models.length) {
+    try {
+      const ids = [...new Set(models.map(model => model.sha256))];
+      const query = new URLSearchParams({ids: ids.join(","), catalog: await digestCatalog()});
+      const result = await request<{failed?: unknown}>(address, `/marcostudio/integrity-failures?${query}`, {headers: {Authorization: `Bearer ${pair.token}`}, signal});
+      if (!Array.isArray(result?.failed) || result.failed.some(id => typeof id !== "string" || !ids.includes(id))) throw new Error("Invalid verification failure response.");
+      for (const id of result.failed as string[]) { remoteFailures.add(id); rememberBad(address, id, "changed"); }
+      failureStateKnown = true;
+    } catch (error) { if (signal?.aborted) throw error; }
+  }
   await Promise.all(models.map(async model => {
     const key = keyFor(address, model.sha256), job = jobs.get(key);
     let state: CheckState = isBad(address, model.sha256) ? "blocked" : job?.active ? "active" : "unverified";
-    if (job && pair) {
+    if (job && pair && failureStateKnown && !remoteFailures.has(model.sha256)) {
       try {
         const result = await status(address, pair.token, job.id, signal);
         if (result.state === "checksum_matched") { job.active = false; clearBad(address, model.sha256); state = isBad(address, model.sha256) ? "blocked" : "matched"; }
@@ -116,24 +128,33 @@ export async function verifiedSnapshots(address: string, models: Model[], signal
   return new Set([...states].filter(([, state]) => state === "matched").map(([id]) => id));
 }
 
+function noteInstance(address: string, instance?: string) {
+  if (observedInstance && (observedInstance.address !== address || observedInstance.instance !== instance)) clearUnverified();
+  observedInstance = {address, instance};
+}
+
 // A helper without integrity support cannot run an integrity job. Unknown
 // capability state is not assumed idle; a 404 denotes the manual-only case.
-export async function integrityBusy(address: string, signal?: AbortSignal): Promise<"idle" | "active" | "unknown"> {
+export async function integrityBusy(address: string, signal?: AbortSignal): Promise<{state: "idle" | "active" | "blocked" | "unknown"; instance?: string}> {
   try {
     const response = await fetch(`${address}/marcostudio/capabilities`, {credentials: "omit", cache: "no-store", redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000)});
-    if (response.status === 404) return "idle";
-    if (!response.ok) return "unknown";
+    if (response.status === 404) { noteInstance(address); return {state: "idle"}; }
+    if (!response.ok) return {state: "unknown"};
     const value = await response.json();
-    if (value?.version !== 1) return "unknown";
-    if (value.integrity_verification !== 1) return "idle";
-    return typeof value.integrity_busy === "boolean" ? value.integrity_busy ? "active" : "idle" : "unknown";
-  } catch (error) { if (signal?.aborted) throw error; return "unknown"; }
+    if (value?.version !== 1) return {state: "unknown"};
+    const instance = typeof value.integrity_instance === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value.integrity_instance) ? value.integrity_instance : undefined;
+    noteInstance(address, instance);
+    if (value.integrity_verification !== 1) return {state: "idle", instance};
+    if (typeof value.integrity_busy !== "boolean" || typeof value.integrity_problem !== "boolean" || !instance) return {state: "unknown"};
+    return {state: value.integrity_busy ? "active" : value.integrity_problem ? "blocked" : "idle", instance};
+  } catch (error) { if (signal?.aborted) throw error; return {state: "unknown"}; }
 }
 export async function allowUnverified(address: string, models: Model[]) {
-  if (!models.length || await integrityBusy(address) !== "idle") throw new Error("Wait for model verification to finish or restore the ComfyUI connection.");
+  const capability = await integrityBusy(address);
+  if (!models.length || capability.state !== "idle") throw new Error("Wait for model verification to finish or resolve a failed verification before continuing.");
   const states = await integrityStates(address, models);
   if ([...states.values()].some(state => state === "blocked" || state === "active")) throw new Error("A model has a failed or active verification. Resolve it before continuing.");
-  allowed = {address, ids: new Set(models.filter(model => states.get(model.sha256) === "unverified").map(model => model.sha256))};
+  allowed = {address, instance: capability.instance, ids: new Set(models.filter(model => states.get(model.sha256) === "unverified").map(model => model.sha256))};
 }
 
 export async function verifyModelSnapshots(address: string, models: Model[], progress: (message: string) => void, signal?: AbortSignal) {

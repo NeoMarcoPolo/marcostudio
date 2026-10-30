@@ -49,6 +49,9 @@ def _register_routes():
     integrity = False
     def integrity_busy():
         return False
+
+    def integrity_problem():
+        return False
     if os.environ.get("MARCOSTUDIO_ENABLE_STORAGE_PAIRING") == "1":
         try:
             from .storage_routes import storage_handler
@@ -74,6 +77,8 @@ def _register_routes():
 
                 start, status, cancel = integrity_handlers(pairing)
                 integrity_busy = start.is_busy
+                integrity_problem = start.has_failure
+                instance.routes.get("/marcostudio/integrity-failures")(start.failures)
                 instance.routes.post("/marcostudio/integrity")(start)
                 instance.routes.get("/marcostudio/integrity/{job}")(status)
                 instance.routes.post("/marcostudio/integrity/{job}/cancel")(cancel)
@@ -97,7 +102,9 @@ def _register_routes():
         return web.json_response({"version": 1, "h3_pdd": _h3_pdd_capable(),
                                   "storage_pairing": 1 if pairing else 0,
                                   "integrity_verification": 1 if integrity else 0,
-                                  "integrity_busy": bool(integrity_busy()) if integrity else False})
+                                  "integrity_busy": bool(integrity_busy()) if integrity else False,
+                                  "integrity_problem": bool(integrity_problem()) if integrity else False,
+                                  "integrity_instance": pairing.volume(0) if pairing else None})
 
 
 _register_routes()

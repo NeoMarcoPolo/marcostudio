@@ -77,24 +77,36 @@ class IntegrityService:
         with self._lock:
             evidence = self._evidence.get(identity)
         epoch = self._epoch()
-        if evidence is None or epoch is None or evidence[0] != epoch or evidence[1] != result.identity:
+        def changed():
+            with self._lock:
+                self._failed[identity] = self._clock()
             return {"state": "changed"}
+        if evidence is None or epoch is None or evidence[0] != epoch or evidence[1] != result.identity:
+            return changed()
         resolved = resolve_loader_choice(identity, self._folder_paths, self._node_mapping)
         if resolved.status != "resolved" or (resolved.path, resolved.size, resolved.digest) != (path, size, digest):
-            return {"state": "changed"}
+            return changed()
         try:
             # Metadata mismatch invalidates historical evidence. A match is
             # NOT treated as proof of what bytes are present now.
             if result.identity is None or _identity(path.stat()) != result.identity:
-                return {"state": "changed"}
+                return changed()
         except OSError:
-            return {"state": "changed"}
+            return changed()
         if self._epoch() != epoch:
-            return {"state": "changed"}
+            return changed()
         return {"state": "checksum_matched", "checked_at": evidence[2]}
 
     def is_busy(self):
         return self._worker.is_busy()
+
+    def failed_ids(self, identities):
+        with self._lock:
+            return [identity for identity in identities if identity in self._failed]
+
+    def has_failure(self):
+        with self._lock:
+            return bool(self._failed)
 
     def cancel(self, job_id):
         return self._worker.cancel(job_id)
@@ -111,9 +123,12 @@ class IntegrityService:
         if result.status == "verified" and after == before and self._idle() and self._epoch() == epoch:
             checked_at = datetime.now(timezone.utc).isoformat()
             with self._lock:
+                self._failed.pop(digest, None)
                 self._evidence[digest] = (epoch, result.identity, checked_at)
             return Verification("checksum_matched", result.identity)
-        if result.status in {"size_mismatch", "hash_mismatch", "changed"}:
+        # A file or queue change after a completed hash invalidates that check.
+        state = result.status if result.status != "verified" else "changed"
+        if state in {"size_mismatch", "hash_mismatch", "changed"}:
             with self._lock:
                 self._failed[digest] = self._clock()
-        return Verification(result.status if result.status != "verified" else "unavailable")
+        return Verification(state)

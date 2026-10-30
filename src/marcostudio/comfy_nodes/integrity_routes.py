@@ -148,8 +148,26 @@ def handlers(pairing, service_factory=None):
             return web.json_response({"state": "unavailable"}, status=404, headers=headers)
         return web.json_response({"cancelled": service.cancel(job)}, headers=headers)
 
+    async def failures(request):
+        if not authorize(request):
+            return web.json_response({"error": "unauthorized"}, status=401, headers=headers)
+        if request.query.get("catalog") != catalog_digest():
+            return web.json_response({"error": "catalog mismatch"}, status=409, headers=headers)
+        raw = request.query.get("ids", "")
+        identities = raw.split(",") if raw else []
+        if (not 1 <= len(identities) <= 32 or len(set(identities)) != len(identities)
+                or any(not re.fullmatch("[0-9a-f]{64}", value) or value not in MODELS for value in identities)):
+            return web.json_response({"error": "invalid request"}, status=400, headers=headers)
+        failed = service.failed_ids(identities) if service is not None else []
+        return web.json_response({"failed": failed}, headers=headers)
+
     def is_busy():
         return admission.locked() or bool(service is not None and service.is_busy())
 
+    def has_failure():
+        return bool(service is not None and service.has_failure())
+
+    start.failures = failures
+    start.has_failure = has_failure
     start.is_busy = is_busy
     return start, status, cancel
