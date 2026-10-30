@@ -2,7 +2,9 @@
 
 Relight photos, change outfits, remove backgrounds, and make videos with your own ComfyUI.
 
-**[Open MarcoStudio](https://neomarcopolo.co/marcostudio/)** · [Tools](#tools) · [Get started](#get-started) · [Run locally](#run-locally)
+**[Open MarcoStudio](https://neomarcopolo.co/marcostudio/)** · [Watch the demo](https://youtu.be/VXpRK7vRnTw) · [Tools](#tools) · [Get started](#get-started) · [Run locally](#run-locally)
+
+The [100-second demo](https://youtu.be/VXpRK7vRnTw) ([MP4](assets/readme/demo.mp4)) shows real runs with their real generation times, and how MarcoStudio talks to your ComfyUI.
 
 [![CI](https://github.com/NeoMarcoPolo/marcostudio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/NeoMarcoPolo/marcostudio/actions/workflows/ci.yml)
 [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
