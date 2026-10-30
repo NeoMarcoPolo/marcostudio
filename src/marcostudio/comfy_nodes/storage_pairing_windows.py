@@ -74,6 +74,9 @@ class WindowsOwnerPairing:
     def accepts(self, token):
         return isinstance(token, str) and token.isascii() and hmac.compare_digest(token, self._token)
 
+    def volume(self, device):
+        return hmac.new(self._token.encode("ascii"), str(device).encode("ascii"), "sha256").hexdigest()[:24]
+
     def close(self):
         if not self._closed:
             if not self._manager.CredDeleteW(self.target, 1, 0):
