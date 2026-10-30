@@ -27,6 +27,14 @@ def test_identity_diagnostic_reports_only_field_comparisons():
     }
 
 
+def test_windows_cross_api_identity_keeps_shared_fields_and_allows_ctime_difference():
+    path_identity = verify.FileIdentity(1, 2, 3, 4, 5)
+    assert verify._windows_path_matches_handle(path_identity, verify.FileIdentity(1, 2, 3, 4, 6))
+    for different in (verify.FileIdentity(9, 2, 3, 4, 5), verify.FileIdentity(1, 9, 3, 4, 5),
+                      verify.FileIdentity(1, 2, 9, 4, 5), verify.FileIdentity(1, 2, 3, 9, 5)):
+        assert not verify._windows_path_matches_handle(path_identity, different)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_exact_file_verifies_and_returns_matching_identity(tmp_path):
     data = b"trusted model fixture"

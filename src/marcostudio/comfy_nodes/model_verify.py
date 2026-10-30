@@ -45,6 +45,14 @@ def _identity_fields_equal(first: FileIdentity, second: FileIdentity) -> dict[st
     return dict(zip(FileIdentity._fields, (a == b for a, b in zip(first, second))))
 
 
+def _windows_path_matches_handle(path_identity: FileIdentity, handle_identity: FileIdentity) -> bool:
+    # CPython on Windows can expose creation time for path.stat().st_ctime
+    # but change time for os.fstat().st_ctime on the same file. Compare the
+    # common fields across these APIs; check native handle change time and
+    # each API's own full identity independently over the read below.
+    return path_identity[:4] == handle_identity[:4]
+
+
 def supports_identity_cache() -> bool:
     """Whether stat-only identity is proven safe for reuse by default.
 
@@ -130,7 +138,7 @@ def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size,
             descriptor = None
             handle = msvcrt.get_osfhandle(stream.fileno())
             opened = os.fstat(stream.fileno())
-            if _identity(initial) != _identity(opened):
+            if not _windows_path_matches_handle(_identity(initial), _identity(opened)):
                 if diagnose is not None:
                     diagnose({"stage": "open_identity", "equal": False,
                               "field_equal": _identity_fields_equal(_identity(initial), _identity(opened))})
@@ -153,12 +161,15 @@ def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size,
             final = os.fstat(stream.fileno())
             current = path.stat()
             final_basic = basic()
-            if (_identity(opened) != _identity(final) or _identity(final) != _identity(current)
+            if (_identity(opened) != _identity(final)
+                    or _identity(initial) != _identity(current)
+                    or not _windows_path_matches_handle(_identity(current), _identity(final))
                     or initial_basic != final_basic or final_basic is None or read_size != expected_size or extra):
                 if diagnose is not None:
                     diagnose({"stage": "final_identity",
                               "opened_final_equal": _identity(opened) == _identity(final),
-                              "final_current_equal": _identity(final) == _identity(current),
+                              "final_current_equal": _windows_path_matches_handle(_identity(current), _identity(final)),
+                              "path_identity_equal": _identity(initial) == _identity(current),
                               "basic_fields_equal": [a == b for a, b in zip(initial_basic, final_basic)] if final_basic else None,
                               "read_size_equal": read_size == expected_size, "extra_byte": bool(extra)})
                 return Verification("changed")
@@ -166,7 +177,9 @@ def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size,
                 return Verification("hash_mismatch")
             if cancelled is not None and cancelled():
                 return Verification("cancelled")
-            return Verification("verified", _identity(final))
+            # Callers subsequently compare with path.stat(), so return that
+            # API's identity; do not mix its Windows ctime with fstat's.
+            return Verification("verified", _identity(current))
     except FileNotFoundError:
         return Verification("missing")
     except OSError:

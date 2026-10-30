@@ -36,6 +36,7 @@ def test_trusted_snapshot_and_invalid_files(tmp_path, monkeypatch):
     result = verify.verify_file(path, len(data), digest(data), chunk_size=3)
     assert result.status == "verified", {"status": result.status, "observations": observations}
     assert result.identity.size == len(data)
+    assert result.identity == verify._identity(path.stat())
     assert not verify.supports_identity_cache()
     assert verify.verify_file(path, len(data) + 1, digest(data)).status == "size_mismatch"
     assert verify.verify_file(path, len(data), digest(b"x" * len(data))).status == "hash_mismatch"
