@@ -2,10 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { useBrowserRuntime } from "./api";
+import { wantsBrowserRuntime } from "./runtimeHint";
 
 async function start() {
   let local = false;
-  if (new URLSearchParams(location.search).get("runtime") !== "browser") {
+  if (!wantsBrowserRuntime(location.search, location.hostname)) {
     try {
       const response = await fetch("/api/settings", {signal: AbortSignal.timeout(2000)});
       const settings = await response.json();
