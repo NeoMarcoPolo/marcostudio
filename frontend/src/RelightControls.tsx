@@ -1,4 +1,4 @@
-import type { Dispatch, PointerEvent, SetStateAction } from "react";
+import { useId, useState, type Dispatch, type PointerEvent, type SetStateAction } from "react";
 import { Lightbulb } from "lucide-react";
 import type { Direction, RelightSettings } from "./api";
 
@@ -27,6 +27,22 @@ const arrowSteps: Partial<Record<string, [number, number]>> = {
   ArrowUp: [0, 10],
   ArrowDown: [0, -10],
 };
+
+function ControlHelp({ label, text, example }: { label: string; text: string; example: string }) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const id = useId();
+  const visible = open || hovered;
+  return <div className="relight-help" onPointerEnter={event => { if (event.pointerType === "mouse") setHovered(true); }}
+    onPointerLeave={event => { if (event.pointerType === "mouse") setHovered(false); }}
+    onKeyDown={event => { if (event.key === "Escape") { setOpen(false); setHovered(false); } }}>
+    <button type="button" className="relight-help-trigger" aria-label={`About ${label}`} aria-expanded={open} aria-describedby={visible ? id : undefined} onClick={() => setOpen(value => !value)}>?</button>
+    {visible && <div id={id} role="tooltip" className="relight-help-card">
+      <div className={`relight-help-example example-${example}`} aria-hidden="true"><span/><i/></div>
+      <p>{text}</p>
+    </div>}
+  </div>;
+}
 
 export function RelightControls({ settings, setSettings, validSeed }: {
   settings: RelightSettings;
@@ -61,12 +77,13 @@ export function RelightControls({ settings, setSettings, validSeed }: {
       </div>
       <div className="control-section">
         <div className="control-heading">
-          <h3>Quick select</h3>
+          <div className="relight-heading"><h3>Quick select</h3><ControlHelp label="quick select" example="direction" text="Choose where the light comes from. For example, Top lights from above; Left lights from the left."/></div>
         </div>
         <div className="direction-presets">
           {presets.map((item) => (
             <button
               key={item.direction}
+              title={`Light from the ${item.name.toLowerCase()}`}
               aria-pressed={settings.direction === item.direction}
               onClick={() => setSettings(previous => {
                 const { azimuth: _a, elevation: _e, ...rest } = previous;
@@ -118,6 +135,7 @@ export function RelightControls({ settings, setSettings, validSeed }: {
           </div>
           <span className="pad-caption">Drag to change light direction</span>
         </div>
+        <div className="relight-help-line"><span>Light direction</span><ControlHelp label="light direction" example="direction" text="Drag the dot to change the light's direction. Use the arrow keys to adjust it in steps."/></div>
         <details className="angle-details">
           <summary>
             Custom direction{" "}
@@ -156,11 +174,12 @@ export function RelightControls({ settings, setSettings, validSeed }: {
         </details>
       </div>
       <div className="control-section">
-        <h3>Light settings</h3>
+        <div className="relight-heading"><h3>Light settings</h3><ControlHelp label="soft and hard light" example="softness" text="Soft light gives gentler transitions; hard light creates more defined highlights and shadows."/></div>
         <div className="segmented">
           {(["soft", "hard"] as const).map((value) => (
             <button
               key={value}
+              title={value === "soft" ? "Gentler light transitions" : "More defined light and shadows"}
               aria-pressed={settings.softness === value}
               onClick={() => change({softness: value})}
             >
@@ -170,12 +189,12 @@ export function RelightControls({ settings, setSettings, validSeed }: {
         </div>
       </div>
       <div className="control-section">
-        <label className="control-heading" htmlFor="brightness">
-          <strong>Brightness</strong>
+        <div className="control-heading">
+          <div className="relight-heading"><label htmlFor="brightness"><strong>Brightness</strong></label><ControlHelp label="brightness" example="brightness" text="Change the intensity of the added light. Higher values make it brighter."/></div>
           <span className="brightness-value">
             {settings.brightness}%
           </span>
-        </label>
+        </div>
         <input
           id="brightness"
           aria-label="Brightness"
@@ -188,9 +207,9 @@ export function RelightControls({ settings, setSettings, validSeed }: {
         />
       </div>
       <div className="control-section color-row">
-        <label htmlFor="light-color">
+        <div className="relight-heading"><label htmlFor="light-color">
           <strong>Light color</strong>
-        </label>
+        </label><ControlHelp label="light color" example="color" text="Choose the color of the added light, such as warm amber or cool blue."/></div>
         <div className="color-input">
           <input
             id="light-color"
@@ -203,9 +222,9 @@ export function RelightControls({ settings, setSettings, validSeed }: {
         </div>
       </div>
       <div className="control-section seed-row">
-        <label htmlFor="seed">
+        <div className="relight-heading"><label htmlFor="seed">
           <strong>Seed</strong>
-        </label>
+        </label><ControlHelp label="seed" example="seed" text="The seed controls randomness. Reusing it with the same input and settings helps reproduce a result."/></div>
         <input
           id="seed"
           aria-label="Seed"

@@ -4,6 +4,7 @@ import {
   waitFor,
   fireEvent,
   act,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
@@ -384,9 +385,10 @@ describe("Relight studio", () => {
   it("blocks Generate when readiness fails and opens actionable setup", async () => {
     ready = false;
     render(<App />);
-    await screen.findByText("Setup needed");
+    const setup = await screen.findByRole("region", { name: "Setup needed" });
+    expect(within(setup).getByText("Finish setup to use Relight.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await userEvent.click(within(setup).getByRole("button", { name: "Open setup" }));
     expect(
       screen.getByRole("dialog", { name: "Studio settings" }),
     ).toBeInTheDocument();

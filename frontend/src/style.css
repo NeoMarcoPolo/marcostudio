@@ -77,6 +77,14 @@ main { padding: 0 16px 16px; }
 .status-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .service-state.ready .status-dot { background: var(--accent); }
 .service-state button { padding: 4px 7px; font-size: 11px; }
+.setup-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid #8a7040; border-radius: 10px; background: #30291d; color: #f5ead2; }
+.setup-banner > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; }
+.setup-banner strong { color: #ffdc91; font-size: 14px; }
+.setup-banner span { color: #e4d8c4; font-size: 13px; }
+.setup-banner button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 38px; padding: 7px 13px; border: 1px solid #c7a95e; background: #e3c277; color: #211b10; font-weight: 650; }
+.setup-banner button:hover:not(:disabled) { background: #f0d18b; border-color: #f0d18b; color: #211b10; }
+.setup-banner button:focus-visible { outline: 2px solid #fff0bd; outline-offset: 3px; }
+.setup-banner ~ .studio-grid { height: calc(100dvh - 190px); }
 .studio-grid {
   display: grid; grid-template-columns: 64px minmax(0, 1fr) 328px;
   grid-template-rows: minmax(0, 1fr); gap: 16px; height: calc(100dvh - 120px); min-height: 580px;
@@ -325,6 +333,10 @@ select option { color: var(--text); background: #242629; }
   .tool-menu, .nav-group:last-child .tool-menu { left: 0; right: 0; top: calc(100% + 5px); width: 100%; max-height: min(420px, 70dvh); overflow-y: auto; overscroll-behavior: contain; }
   main { padding: 0 max(10px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
   .page-heading { min-height: 44px; }
+  .setup-banner { align-items: flex-start; gap: 10px; padding: 11px 12px; }
+  .setup-banner > div { display: grid; gap: 3px; }
+  .setup-banner button { min-height: 44px; padding: 8px 10px; }
+  .setup-banner ~ .studio-grid { height: auto; }
   .service-state { font-size: 9px; max-width: 165px; text-align: right; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
   .breadcrumb { font-size: 11px; gap: 5px; }
   .breadcrumb h1 { font-size: 11px; }
@@ -495,6 +507,29 @@ select option { color: var(--text); background: #242629; }
 .download-tip strong { font-size: 0.85rem; }
 .download-tip p { margin: 3px 0 0; }
 .download-tip-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Small, optional explanations for the Relight controls. */
+.relight-heading { display: inline-flex; align-items: center; gap: 7px; }
+.relight-heading h3 { margin: 0; }
+.relight-help-line { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); font-size: 11px; }
+.relight-help { position: relative; display: inline-flex; z-index: 3; }
+.relight-help-trigger { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid #686b69; border-radius: 50%; background: transparent; color: #c7cbc5; font-size: 11px; cursor: pointer; }
+.relight-help-trigger:focus-visible { outline: 2px solid #d5ee6f; outline-offset: 2px; }
+.relight-help-card { position: absolute; z-index: 10; top: calc(100% + 8px); left: -80px; width: min(245px, 70vw); padding: 10px; border: 1px solid #50544d; border-radius: 10px; background: #252927; color: #f4f5ef; box-shadow: 0 8px 24px #0008; font-size: 12px; line-height: 1.4; }
+.color-row .relight-help-card, .seed-row .relight-help-card { top: auto; bottom: calc(100% + 8px); }
+.relight-help-card p { margin: 8px 0 0; }
+.relight-help-example { height: 35px; position: relative; overflow: hidden; border-radius: 6px; background: #161a18; }
+.relight-help-example span { position: absolute; left: 48%; top: 7px; width: 23px; height: 23px; border-radius: 50%; background: #9ea797; }
+.relight-help-example i { position: absolute; left: 16%; top: 13px; width: 14px; height: 14px; border-radius: 50%; background: #d5ee6f; box-shadow: 0 0 15px #d5ee6f; animation: relight-help-light 2.8s ease-in-out infinite alternate; }
+.example-brightness i { animation-name: relight-help-brightness; }
+.example-color i { animation-name: relight-help-color; }
+.example-softness i { animation-name: relight-help-softness; }
+.example-seed i { animation: none; }
+@keyframes relight-help-light { to { transform: translateX(120px); } }
+@keyframes relight-help-brightness { from { opacity: .25; box-shadow: 0 0 4px #d5ee6f; } to { opacity: 1; box-shadow: 0 0 20px #d5ee6f; } }
+@keyframes relight-help-color { from { background: #ffb870; box-shadow: 0 0 15px #ffb870; } to { background: #82bfff; box-shadow: 0 0 15px #82bfff; } }
+@keyframes relight-help-softness { from { box-shadow: 0 0 3px #d5ee6f; } to { box-shadow: 0 0 20px 8px #d5ee6f80; } }
+@media (prefers-reduced-motion: reduce) { .relight-help-example i { animation: none; } }
 .notifications { position: fixed; z-index: 100; right: 16px; bottom: 16px; width: min(360px, calc(100vw - 32px)); display: grid; gap: 8px; pointer-events: none; }
 .notification-announcer { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .notification { display: flex; align-items: start; gap: 12px; justify-content: space-between; padding: 12px 14px; border: 1px solid #606764; border-radius: 10px; background: #26302b; color: #f0f6ef; box-shadow: 0 8px 28px #0006; pointer-events: auto; }

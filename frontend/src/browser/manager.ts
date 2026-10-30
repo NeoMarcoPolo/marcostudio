@@ -7,7 +7,8 @@ const ROOT = "/v2/manager/queue";
 // Manager resolves these types through folder_paths, honoring extra model paths.
 // Categories without a supported mapping use manual downloads, never models/etc.
 const types: Record<string, string> = {diffusion_models: "diffusion_model", text_encoders: "text_encoders", vae: "vae", loras: "lora", controlnet: "controlnet"};
-export const canInstall = (model: Model) => !!types[model.category];
+export const managerType = (model: Model) => types[model.category];
+export const canInstall = (model: Model) => !!managerType(model);
 export interface InstallTask {id: string; model: Model; state: "submitting" | "queued" | "succeeded" | "failed" | "unknown"; error?: string; sawMissingFile?: boolean; batchId?: string; submittedAt?: number; observedFinishedAt?: number}
 interface Status {total_count: number; in_progress_count: number; pending_count: number; is_processing: boolean}
 interface TaskResult {ui_id: string; result: string; status?: {status_str: string; completed: boolean; messages: string[]}}
@@ -88,8 +89,7 @@ export async function reconcileInstalls(address = endpoint()) {
   return installTasks(address);
 }
 
-export async function startDownloads(models: Model[]) {
-  const address = endpoint();
+export async function startDownloads(models: Model[], address = endpoint()) {
   const run = () => installModels(address, models);
   return navigator.locks ? await navigator.locks.request(`marcostudio:downloads:${address}`, run) : run();
 }
