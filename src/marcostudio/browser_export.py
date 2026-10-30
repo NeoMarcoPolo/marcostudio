@@ -113,7 +113,7 @@ def export_nodes(destination=NODE_BUNDLE):
 
     with ZipFile(destination, "w") as archive:
         for path in sorted(source.iterdir(), key=lambda path: path.name):
-            if path.suffix == ".py" or path.name == "LICENSE":
+            if path.suffix == ".py" or path.name in {"LICENSE", "README.md"}:
                 archive.writestr(entry(f"marcostudio/{path.name}"), path.read_bytes().replace(b"\r\n", b"\n"))
         archive.writestr(entry("marcostudio/.marcostudio-nodes"),
                          "Managed by marcostudio install-nodes\n")

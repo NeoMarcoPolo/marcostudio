@@ -16,5 +16,6 @@ def install_nodes(comfy_dir: Path | None) -> Path:
     for path in source.glob("*.py"):
         shutil.copyfile(path, destination / path.name)
     shutil.copyfile(source / "LICENSE", destination / "LICENSE")
+    shutil.copyfile(source / "README.md", destination / "README.md")
     marker.write_text("Managed by marcostudio install-nodes\n", encoding="utf-8")
     return destination
