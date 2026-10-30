@@ -62,6 +62,7 @@ def test_manual_node_bundle_matches_source_and_is_reproducible(tmp_path):
             "marcostudio/__init__.py", "marcostudio/h3.py", "marcostudio/LICENSE", "marcostudio/README.md",
             "marcostudio/model_storage.py", "marcostudio/model_verify.py", "marcostudio/storage_catalog.py",
             "marcostudio/storage_pairing.py", "marcostudio/storage_routes.py",
+            "marcostudio/model_storage_windows.py", "marcostudio/storage_pairing_windows.py",
             "marcostudio/.marcostudio-nodes",
         }
         assert b"source_fps" in bundle.read("marcostudio/h3.py")
