@@ -1,5 +1,8 @@
 """Portable MarcoStudio ComfyUI custom nodes; requires native MiniMax H3 support."""
 
+import atexit
+import logging
+import os
 import sys
 
 from .h3 import MarcoStudioH3InpaintLatent, MarcoStudioH3Window
@@ -42,9 +45,23 @@ def _register_routes():
     if any(getattr(route, "path", None) == path for route in instance.routes):
         return
 
+    pairing = None
+    if os.environ.get("MARCOSTUDIO_ENABLE_STORAGE_PAIRING") == "1":
+        try:
+            from .storage_pairing import OwnerPairing
+            from .storage_routes import storage_handler
+            pairing = OwnerPairing()
+            atexit.register(pairing.close)
+            instance.routes.get("/marcostudio/storage")(storage_handler(pairing))
+            # The socket path is not a secret; only the owner-local CLI sees the token.
+            logging.info("MarcoStudio storage pairing socket: %s", pairing.path)
+        except (ImportError, OSError, RuntimeError):
+            logging.warning("MarcoStudio storage pairing unavailable")
+
     @instance.routes.get(path)
     async def capabilities(request):
-        return web.json_response({"version": 1, "h3_pdd": _h3_pdd_capable()})
+        return web.json_response({"version": 1, "h3_pdd": _h3_pdd_capable(),
+                                  "storage_pairing": 1 if pairing else 0})
 
 
 _register_routes()

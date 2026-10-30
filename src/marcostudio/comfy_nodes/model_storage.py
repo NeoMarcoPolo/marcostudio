@@ -16,6 +16,7 @@ from typing import NamedTuple
 class StorageSpace(NamedTuple):
     status: str
     available_bytes: int | None = None
+    device: int | None = None
 
 
 def available_space(destination: Path) -> StorageSpace:
@@ -74,7 +75,7 @@ def available_space(destination: Path) -> StorageSpace:
                 return StorageSpace("unavailable")
             if type(info.f_bavail) is not int or type(info.f_frsize) is not int or info.f_bavail < 0 or info.f_frsize <= 0:
                 return StorageSpace("unavailable")
-            return StorageSpace("available", info.f_bavail * info.f_frsize)
+            return StorageSpace("available", info.f_bavail * info.f_frsize, opened.st_dev)
         except OSError:
             return StorageSpace("unavailable")
         finally:

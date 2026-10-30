@@ -33,7 +33,7 @@ def test_missing_destination_checks_nearest_existing_ancestor(tmp_path, monkeypa
 
     monkeypatch.setattr(storage.os, "fstatvfs", usage)
     result = storage.available_space(ancestor / "nested" / "destination")
-    assert result == storage.StorageSpace("available", 123456)
+    assert result == storage.StorageSpace("available", 123456, ancestor.stat().st_dev)
     assert seen == [(ancestor.stat().st_dev, ancestor.stat().st_ino)]
 
 
