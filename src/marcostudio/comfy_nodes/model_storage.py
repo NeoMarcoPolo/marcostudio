@@ -80,3 +80,34 @@ def available_space(destination: Path) -> StorageSpace:
         finally:
             if descriptor is not None:
                 os.close(descriptor)
+
+
+def manager_default_space(filename: str, model_type: str) -> StorageSpace:
+    """Measure Manager's actual default destination for trusted catalog metadata.
+
+    This is an offline primitive, not an authorization boundary. Callers must
+    select both arguments from a trusted catalog, never from a network request.
+    It invokes the installed Manager's own resolver rather than guessing model
+    folders. If the Manager is absent, incompatible, or its mapping changes
+    while measuring, the result is unavailable. No path is returned.
+    """
+    if (not isinstance(filename, str) or not filename or filename in {".", "..", "<huggingface>"}
+            or any(char in filename for char in ("/", "\\", ":"))
+            or not isinstance(model_type, str) or not model_type):
+        return StorageSpace("unavailable")
+    try:
+        from comfyui_manager.glob.constants import model_dir_name_map
+        from comfyui_manager.glob.utils.model_utils import get_model_dir
+
+        if model_type.lower() not in model_dir_name_map:
+            return StorageSpace("unavailable")
+        data = {"filename": filename, "type": model_type, "save_path": "default"}
+        first = get_model_dir(data)
+        if not isinstance(first, str):
+            return StorageSpace("unavailable")
+        result = available_space(Path(first))
+        if get_model_dir(data) != first:
+            return StorageSpace("unavailable")
+        return result
+    except (ImportError, OSError, KeyError, IndexError, TypeError, ValueError, AttributeError):
+        return StorageSpace("unavailable")

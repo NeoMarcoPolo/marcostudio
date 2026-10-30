@@ -134,3 +134,47 @@ def test_symlink_retarget_during_measurement_is_unavailable(tmp_path, monkeypatc
 def test_unproven_non_posix_platform_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(storage.os, "name", "nt")
     assert storage.available_space(tmp_path) == storage.StorageSpace("unavailable")
+
+
+def test_manager_default_space_uses_manager_resolver_and_hides_paths(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType
+
+    constants = ModuleType("comfyui_manager.glob.constants")
+    constants.model_dir_name_map = {"checkpoint": "checkpoints"}
+    resolver = ModuleType("comfyui_manager.glob.utils.model_utils")
+    requests = []
+
+    def resolve(data):
+        requests.append(dict(data))
+        return str(tmp_path)
+
+    resolver.get_model_dir = resolve
+    monkeypatch.setitem(sys.modules, "comfyui_manager.glob.constants", constants)
+    monkeypatch.setitem(sys.modules, "comfyui_manager.glob.utils.model_utils", resolver)
+    monkeypatch.setattr(storage, "available_space", lambda path: storage.StorageSpace("available", 42))
+    result = storage.manager_default_space("model.safetensors", "Checkpoint")
+    assert result == storage.StorageSpace("available", 42)
+    assert requests == [{"filename": "model.safetensors", "type": "Checkpoint", "save_path": "default"}] * 2
+    assert str(tmp_path) not in repr(result)
+    assert storage.manager_default_space("../model", "Checkpoint").status == "unavailable"
+    assert storage.manager_default_space("model", "unknown").status == "unavailable"
+
+
+def test_manager_default_space_rejects_mapping_change_and_resolution_failure(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType
+
+    constants = ModuleType("comfyui_manager.glob.constants")
+    constants.model_dir_name_map = {"checkpoint": "checkpoints"}
+    resolver = ModuleType("comfyui_manager.glob.utils.model_utils")
+    paths = iter([str(tmp_path), str(tmp_path / "other")])
+    resolver.get_model_dir = lambda _data: next(paths)
+    monkeypatch.setitem(sys.modules, "comfyui_manager.glob.constants", constants)
+    monkeypatch.setitem(sys.modules, "comfyui_manager.glob.utils.model_utils", resolver)
+    monkeypatch.setattr(storage, "available_space", lambda path: storage.StorageSpace("available", 42))
+    assert storage.manager_default_space("model", "checkpoint").status == "unavailable"
+    def fail(_data):
+        raise KeyError("private path")
+    resolver.get_model_dir = fail
+    assert storage.manager_default_space("model", "checkpoint") == storage.StorageSpace("unavailable")
