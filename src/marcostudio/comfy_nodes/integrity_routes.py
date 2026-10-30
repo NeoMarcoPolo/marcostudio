@@ -12,7 +12,7 @@ import sys
 from aiohttp import web
 
 from .integrity_catalog import LOADERS, MODELS
-from .integrity_manager import manager_queue_state
+from .integrity_manager import manager_queue_epoch, manager_queue_state
 from .integrity_service import IntegrityService
 from .storage_routes import _safe_transport
 
@@ -42,7 +42,7 @@ def handlers(pairing, service_factory=None):
         mapping = getattr(nodes, "NODE_CLASS_MAPPINGS", None)
         if paths is None or not isinstance(mapping, dict):
             return None
-        return IntegrityService(paths, mapping, manager_queue_state)
+        return IntegrityService(paths, mapping, manager_queue_state, queue_epoch=manager_queue_epoch)
 
     async def body(request):
         if request.content_type != "application/json":
@@ -121,7 +121,7 @@ def handlers(pairing, service_factory=None):
             status_pending -= 1
             raise
         try:
-            pending = asyncio.create_task(asyncio.to_thread(service.status, job))
+            pending = asyncio.create_task(asyncio.to_thread(service.status_detail, job))
         except BaseException:
             status_lock.release()
             status_pending -= 1
@@ -134,10 +134,11 @@ def handlers(pairing, service_factory=None):
                 logging.warning("MarcoStudio integrity status unavailable")
         pending.add_done_callback(finished)
         try:
-            state = await asyncio.shield(pending)
+            detail = await asyncio.shield(pending)
         except Exception:
             return web.json_response({"state": "unavailable"}, status=503, headers=headers)
-        return web.json_response({"state": state or "unavailable"}, status=200 if state else 404, headers=headers)
+        state = detail.get("state")
+        return web.json_response(detail if state else {"state": "unavailable"}, status=200 if state else 404, headers=headers)
 
     async def cancel(request):
         if not authorize(request):

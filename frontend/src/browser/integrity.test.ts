@@ -10,11 +10,11 @@ afterEach(() => { unpairIntegrity(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 
 it("requires a paired verification and rechecks each snapshot before allowing it", async () => {
   vi.stubGlobal("crypto", webcrypto);
-  let state = "snapshot_verified";
+  let state = "checksum_matched";
   const requests: {url: string; init?: RequestInit}[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     requests.push({url: String(url), init});
-    return new Response(JSON.stringify(String(url).endsWith("/integrity") ? {state: "accepted", job} : {state}), {status: 200});
+    return new Response(JSON.stringify(String(url).endsWith("/integrity") ? {state: "accepted", job} : {state, checked_at: "2026-10-30T18:00:00+00:00"}), {status: 200});
   }));
   expect((await verifiedSnapshots(address, [model])).size).toBe(0);
   pairIntegrity(address, "owner-secret");

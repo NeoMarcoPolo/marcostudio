@@ -26,10 +26,12 @@ async function digestCatalog(): Promise<string> {
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2,"0")).join("");
 }
 
-async function status(address: string, token: string, job: string, signal?: AbortSignal): Promise<string> {
-  if (!canPairStorage(address) || !/^[A-Za-z0-9_-]{24}$/.test(job)) return "unavailable";
-  const result = await request<{state?: string}>(address, `/marcostudio/integrity/${job}`, {headers: {Authorization: `Bearer ${token}`}, signal});
-  return typeof result?.state === "string" ? result.state : "unavailable";
+async function status(address: string, token: string, job: string, signal?: AbortSignal): Promise<{state: string; checkedAt?: string}> {
+  if (!canPairStorage(address) || !/^[A-Za-z0-9_-]{24}$/.test(job)) return {state: "unavailable"};
+  const result = await request<{state?: string; checked_at?: string}>(address, `/marcostudio/integrity/${job}`, {headers: {Authorization: `Bearer ${token}`}, signal});
+  if (typeof result?.state !== "string") return {state: "unavailable"};
+  if (result.state === "checksum_matched" && (typeof result.checked_at !== "string" || !Number.isFinite(Date.parse(result.checked_at)))) return {state: "unavailable"};
+  return {state: result.state, checkedAt: result.checked_at};
 }
 
 export async function verifiedSnapshots(address: string, models: Model[], signal?: AbortSignal): Promise<Set<string>> {
@@ -39,7 +41,7 @@ export async function verifiedSnapshots(address: string, models: Model[], signal
   await Promise.all(models.map(async model => {
     const job = jobs.get(model.sha256);
     if (!job) return;
-    try { if (await status(address, token, job, signal) === "snapshot_verified" && paired?.address === address && paired.token === token) result.add(model.sha256); }
+    try { if ((await status(address, token, job, signal)).state === "checksum_matched" && paired?.address === address && paired.token === token) result.add(model.sha256); }
     catch (error) { if (signal?.aborted) throw error; }
   }));
   return result;
@@ -64,8 +66,11 @@ export async function verifyModelSnapshots(address: string, models: Model[], pro
       while (true) {
         if (signal?.aborted || paired?.address !== address || paired.token !== token) throw new Error("Verification cancelled.");
         const current = await status(address, token, job, signal);
-        if (current === "snapshot_verified") break;
-        if (current !== "queued" && current !== "running") throw new Error(`Verification of ${model.filename} did not complete (${current}).`);
+        if (current.state === "checksum_matched") {
+          progress(`Checksum matched for ${model.filename} during the check at ${new Date(current.checkedAt!).toLocaleString()}. Files can change during or afterward.`);
+          break;
+        }
+        if (current.state !== "queued" && current.state !== "running") throw new Error(`Verification of ${model.filename} did not complete (${current.state}).`);
         await new Promise<void>(resolve => setTimeout(resolve, 1000));
       }
     } catch (error) {
@@ -74,5 +79,5 @@ export async function verifyModelSnapshots(address: string, models: Model[], pro
       throw error;
     }
   }
-  progress("Models verified at this moment. Files can change afterward.");
+  progress("Checksums matched during their last checks. Files can change during or afterward.");
 }

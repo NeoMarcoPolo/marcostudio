@@ -24,3 +24,14 @@ Loopback HTTP and direct HTTPS are supported by the helper. The browser may
 require local-network permission. Never send the secret to a remote plain HTTP
 address. Pairing protects only the MarcoStudio storage helper, not other
 ComfyUI endpoints.
+
+## Model checksum checks
+
+The helper can hash model files only after an explicit request from a paired
+client. A match says the checksum matched during the recorded check; it does
+not guarantee that the file stayed unchanged during or after the check. The
+helper discards observations after restart, and discards them when it observes
+Manager queue activity or a file identity change. Other programs or weak
+filesystem metadata can hide changes. Check again after an interrupted or
+external download, and do not treat an older match as proof of current bytes.
+Windows checksum checks are currently unavailable.

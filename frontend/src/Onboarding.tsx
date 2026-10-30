@@ -311,12 +311,12 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         </form>}
         {pair && <button type="button" onClick={() => {verifyAbort.current?.abort(); unpairIntegrity(); setPair(null); setSpace(null); setSpaceMessage(""); void refresh();}}>Unpair helper</button>}
         {presentModels.length > 0 && unverified && <section aria-label="Model integrity verification">
-          <p>Some model files were found but have not been verified. Verification reads the full files and can take a while. Files may change afterward.</p>
+          <p>Some model files were found but their checksums have not been checked in this session. Checks read the full files and can take a while. Files can change during or afterward.</p>
           {!spaceSupported && <p>Enable and pair the MarcoStudio helper in ComfyUI to verify model files.</p>}
           {pair && <button disabled={verifying || checking || queueBlocked || pendingDownloads} onClick={() => {const target = endpoint(), controller = new AbortController(); verifyAbort.current = controller; setVerifying(true); setVerificationMessage(""); void verifyModelSnapshots(target, presentModels, message => {if (current.current) setVerificationMessage(message);}, controller.signal).then(async () => {if (current.current && endpoint() === target) await refresh();}).catch(error => {if (current.current) setVerificationMessage(error instanceof Error ? error.message : "Model verification failed.");}).finally(() => {if (current.current) setVerifying(false);});}}>{verifying ? "Verifying…" : "Verify model files"}</button>}
           {verifying && <button type="button" onClick={() => verifyAbort.current?.abort()}>Cancel verification</button>}
-          {verificationMessage && <p role="status">{verificationMessage}</p>}
         </section>}
+        {verificationMessage && <p role="status">{verificationMessage}</p>}
         {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
           <h3 id="missing-models-title">Missing models</h3>
           {!pair && <p>Available disk space cannot be checked here. Check the drive where ComfyUI stores models, including extra room for temporary files.</p>}
@@ -365,7 +365,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {tasks.some(task => task.state === "succeeded" && missing.some(model => model.url === task.model.url)) && <p>Downloaded. Restart ComfyUI when idle to load the model.</p>}
         {!reviewModels && <div className="setup-secondary"><button onClick={() => setView("requirements")}>Models and nodes</button><button onClick={() => setView("connection")}>Change address</button></div>}
       </>}
-      {view === "setup" && step === 2 && <><p>Model files passed verification at the last check. Files can change afterward; MarcoStudio checks again before starting a task.</p>{recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}<button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></>}
+      {view === "setup" && step === 2 && <><p>Model checksums matched during their last checks. Files can change during or afterward; MarcoStudio checks for observed changes again before starting a task.</p>{recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}<button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></>}
       {view === "setup" && step !== 1 && <div className="setup-secondary"><button onClick={() => setView("connection")}>Change address</button></div>}
       {view === "requirements" && <section className="requirement-details">
           {!manager && missing.length > 0 && <p><a href="https://docs.comfy.org/manager" target="_blank" rel="noopener noreferrer">Enable ComfyUI-Manager</a> for automatic downloads, or add the files below.</p>}

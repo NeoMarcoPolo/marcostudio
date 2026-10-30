@@ -82,7 +82,7 @@ class VerificationWorker:
         """Internal snapshot only; do not expose paths or metadata to clients."""
         with self._lock:
             job = self._results.get(job_id)
-            if not job or job.state != "snapshot_verified" or job.observation is None:
+            if not job or job.state != "checksum_matched" or job.observation is None:
                 return None
             return job.identity, job.path, job.size, job.digest, job.observation
 
@@ -97,7 +97,7 @@ class VerificationWorker:
         with self._lock:
             # Publish and cancel synchronize under the same lock.
             job.state = "cancelled" if job.cancelled.is_set() else state
-            job.observation = result if job.state == "snapshot_verified" else None
+            job.observation = result if job.state == "checksum_matched" else None
             next_job = self._pending
             self._pending = None
             self._active = next_job

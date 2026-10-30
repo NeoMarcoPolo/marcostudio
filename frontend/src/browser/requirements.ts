@@ -166,7 +166,7 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
   const verified = await verifiedSnapshots(address, present, signal);
   for (const model of present) if (!verified.has(model.sha256)) result.checks.push({
     name: `integrity:${model.key}`, status: "fail",
-    message: `${model.filename} was found but its integrity has not been verified.`,
+    message: `${model.filename} was found but its checksum has not matched during a check in this session.`,
   });
   result.ready = !result.checks.some(check => check.status === "fail");
   return result;

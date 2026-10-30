@@ -27,8 +27,8 @@ def test_authentication_catalog_and_status():
         def submit(self, ident):
             calls.append(ident)
             return "accepted", job
-        def status(self, value):
-            return "snapshot_verified" if value == job else None
+        def status_detail(self, value):
+            return {"state": "checksum_matched", "checked_at": "2026-10-30T18:00:00+00:00"} if value == job else {"state": None}
         def cancel(self, value):
             return value == job
     async def run():
@@ -65,7 +65,7 @@ def test_authentication_catalog_and_status():
                 assert response.status == 200
             assert calls == [identity, identity]
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
-                assert await response.json() == {"state": "snapshot_verified"}
+                assert await response.json() == {"state": "checksum_matched", "checked_at": "2026-10-30T18:00:00+00:00"}
             async with client.post(server.make_url("/cancel/" + job), headers=auth) as response:
                 assert await response.json() == {"cancelled": True}
             async with client.get(server.make_url("/status/" + job)) as response:
@@ -99,10 +99,7 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
         def INPUT_TYPES():
             return {"required": {"name": (["model.bin"],)}}
 
-    service_module = sys.modules["route_test_nodes.integrity_service"]
-    # Positive control for the route with a hypothetical proven filesystem.
-    monkeypatch.setattr(service_module, "supports_identity_cache", lambda: True)
-    service = module.IntegrityService(Paths(), {"Loader": Loader}, lambda: "idle")
+    service = module.IntegrityService(Paths(), {"Loader": Loader}, lambda: "idle", queue_epoch=lambda: ("queue", 0))
     pairing = SimpleNamespace(accepts=lambda value: value == "correct")
     async def run():
         app = web.Application()
@@ -120,7 +117,7 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
                 if state not in {"running", "queued"}:
                     break
                 await asyncio.sleep(.01)
-            assert state == "snapshot_verified"
+            assert state == "checksum_matched"
             path.write_bytes(b"modified fixture")
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
                 assert (await response.json())["state"] == "changed"
@@ -137,12 +134,12 @@ def test_cancelled_status_does_not_block_loop_or_release_worker_early():
     class Service:
         def submit(self, _identity):
             return "accepted", job
-        def status(self, _job):
+        def status_detail(self, _job):
             calls.append(1)
             if len(calls) == 1:
                 entered.set()
                 assert release.wait(3)
-            return "snapshot_verified"
+            return {"state": "checksum_matched", "checked_at": "2026-10-30T18:00:00+00:00"}
     class Content:
         done = False
         async def read(self, _n):
