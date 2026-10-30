@@ -6,7 +6,7 @@ import { CONNECTION_DRAFT_KEY, discover, endpoint, normalizeAddress, selectConne
 import { ConnectionHelp } from "./ConnectionHelp";
 import { canInstall, installTasks, managerAvailable, reconcileInstalls, resumeDownloads, startDownloads, type InstallTask } from "./browser/manager";
 import type { Requirements } from "./browser/requirements";
-import { checkStorage, spaceGroups, supportsStoragePairing, type SpaceReport } from "./browser/modelSpace";
+import { checkStorage, spaceGroups, supportsIntegrityVerification, supportsStoragePairing, type SpaceReport } from "./browser/modelSpace";
 import { pairIntegrity, unpairIntegrity, verifyModelSnapshots } from "./browser/integrity";
 
 export const enteredKey = () => `marcostudio.entered:${endpoint()}`;
@@ -99,6 +99,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const [error, setError] = useState("");
   const [manager, setManager] = useState(false);
   const [spaceSupported, setSpaceSupported] = useState(false);
+  const [integritySupported, setIntegritySupported] = useState(false);
   const [pairInput, setPairInput] = useState("");
   const [pair, setPair] = useState<{address: string; token: string} | null>(null);
   const [space, setSpace] = useState<SpaceReport | null>(null);
@@ -147,8 +148,11 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
 
   useEffect(() => {
     const address = endpoint(); let active = true;
-    setSpaceSupported(false); setPair(null); setPairInput(""); setSpace(null); setSpaceMessage("");
-    if (connectedHere) void supportsStoragePairing(address).then(available => { if (active) setSpaceSupported(available); });
+    setSpaceSupported(false); setIntegritySupported(false); setPair(null); setPairInput(""); setSpace(null); setSpaceMessage("");
+    if (connectedHere) {
+      void supportsStoragePairing(address).then(available => { if (active) setSpaceSupported(available); });
+      void supportsIntegrityVerification(address).then(available => { if (active) setIntegritySupported(available); });
+    }
     return () => { active = false; };
   }, [connectedHere, report?.address]);
 
@@ -301,8 +305,9 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {(!pendingDownloads || reviewModels) && <p className="requirements-summary">{missing.length > 0 && <span>{missing.length} model{missing.length === 1 ? "" : "s"} missing</span>}{missing.length > 0 && <span> · {formatSize(missing.reduce((total, model) => total + model.size, 0))}</span>}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>}
         {pendingDownloads && reviewModels && <button className="setup-back" onClick={() => setReviewModels(false)}>← Back to download progress</button>}
           {!pair && <details className="storage-pairing-help"><summary>How to enable model verification and disk-space checks</summary>
-            <p>Install the MarcoStudio nodes, then start ComfyUI from a terminal with <code>MARCOSTUDIO_ENABLE_STORAGE_PAIRING=1</code> before your usual launch command. This optional helper currently supports macOS and Linux; Windows and ComfyUI Desktop launch setup have not been verified.</p>
+            <p>Install the MarcoStudio nodes, then start ComfyUI from a terminal with <code>MARCOSTUDIO_ENABLE_STORAGE_PAIRING=1</code> before your usual launch command. Terminal setup supports macOS and Linux; Windows is experimental. ComfyUI Desktop launch setup has not been verified.</p>
             <p>Find the MarcoStudio storage pairing socket path in the ComfyUI startup log. In a separate terminal, from the ComfyUI folder, run <code>python custom_nodes/marcostudio/storage_pairing.py &lt;socket path&gt;</code> using the same Python as ComfyUI. Paste the resulting code here. The code is visible in that terminal; restarting ComfyUI changes it.</p>
+            <p>Windows terminal launch is experimental. In the PowerShell session used to start ComfyUI, set <code>$env:MARCOSTUDIO_ENABLE_STORAGE_PAIRING = "1"</code>, <code>$env:MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE = "1"</code>, and <code>$env:MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM = "1"</code>. After startup, use the credential target in the log with <code>python custom_nodes/marcostudio/storage_pairing_windows.py &lt;credential target&gt;</code> in a terminal in the same Windows logon session. Desktop and portable launch flows are not yet verified.</p>
             <p>ComfyUI must allow this MarcoStudio page's origin, and your browser may ask for local-network access.</p>
           </details>}
         {spaceSupported && !pair && <form onSubmit={event => {event.preventDefault(); if (pairInput.trim()) { try { const address = endpoint(), token = pairInput.trim(); pairIntegrity(address, token); setPair({address, token}); setPairInput(""); } catch { setVerificationMessage("Couldn't pair the helper."); } }}}>
@@ -312,8 +317,8 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {pair && <button type="button" onClick={() => {verifyAbort.current?.abort(); unpairIntegrity(); setPair(null); setSpace(null); setSpaceMessage(""); void refresh();}}>Unpair helper</button>}
         {presentModels.length > 0 && unverified && <section aria-label="Model integrity verification">
           <p>Some model files were found but their checksums have not been checked in this session. Checks read the full files and can take a while. Files can change during or afterward.</p>
-          {!spaceSupported && <p>Enable and pair the MarcoStudio helper in ComfyUI to verify model files.</p>}
-          {pair && <button disabled={verifying || checking || queueBlocked || pendingDownloads} onClick={() => {const target = endpoint(), controller = new AbortController(); verifyAbort.current = controller; setVerifying(true); setVerificationMessage(""); void verifyModelSnapshots(target, presentModels, message => {if (current.current) setVerificationMessage(message);}, controller.signal).then(async () => {if (current.current && endpoint() === target) await refresh();}).catch(error => {if (current.current) setVerificationMessage(error instanceof Error ? error.message : "Model verification failed.");}).finally(() => {if (current.current) setVerifying(false);});}}>{verifying ? "Verifying…" : "Verify model files"}</button>}
+          {!integritySupported && <p>Model checksum checks are unavailable on this ComfyUI instance. Enable the helper and its platform-specific checksum option, then restart ComfyUI.</p>}
+          {pair && integritySupported && <button disabled={verifying || checking || queueBlocked || pendingDownloads} onClick={() => {const target = endpoint(), controller = new AbortController(); verifyAbort.current = controller; setVerifying(true); setVerificationMessage(""); void verifyModelSnapshots(target, presentModels, message => {if (current.current) setVerificationMessage(message);}, controller.signal).then(async () => {if (current.current && endpoint() === target) await refresh();}).catch(error => {if (current.current) setVerificationMessage(error instanceof Error ? error.message : "Model verification failed.");}).finally(() => {if (current.current) setVerifying(false);});}}>{verifying ? "Verifying…" : "Verify model files"}</button>}
           {verifying && <button type="button" onClick={() => verifyAbort.current?.abort()}>Cancel verification</button>}
         </section>}
         {verificationMessage && <p role="status">{verificationMessage}</p>}

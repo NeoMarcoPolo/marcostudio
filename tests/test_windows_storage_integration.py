@@ -103,11 +103,14 @@ def test_windows_capability_registers_only_after_explicit_opt_in(monkeypatch):
                 return handler
             return register
 
+        post = get
+
     instance = SimpleNamespace(routes=Routes())
     server = SimpleNamespace(PromptServer=SimpleNamespace(instance=instance))
     monkeypatch.setitem(sys.modules, "server", server)
     monkeypatch.setenv("MARCOSTUDIO_ENABLE_STORAGE_PAIRING", "1")
     monkeypatch.delenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE", raising=False)
+    monkeypatch.delenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM", raising=False)
     monkeypatch.setattr("atexit.register", lambda func: owners.append(func))
     spec = importlib.util.spec_from_file_location(package, ROOT / "__init__.py",
                                                   submodule_search_locations=[str(ROOT)])
@@ -124,6 +127,84 @@ def test_windows_capability_registers_only_after_explicit_opt_in(monkeypatch):
         capabilities = json.loads(asyncio.run(route_table[-1][1](None)).text)
         assert capabilities["storage_pairing"] == 1
         assert capabilities["integrity_verification"] == 0
+        route_table.clear()
+        monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM", "1")
+        module._register_routes()
+        assert [path for path, _ in route_table] == [
+            "/marcostudio/integrity", "/marcostudio/integrity/{job}",
+            "/marcostudio/integrity/{job}/cancel", "/marcostudio/storage", "/marcostudio/capabilities",
+        ]
+        capabilities = json.loads(asyncio.run(route_table[-1][1](None)).text)
+        assert capabilities["storage_pairing"] == 1
+        assert capabilities["integrity_verification"] == 1
     finally:
         for close in owners:
             close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires an actual Windows runner")
+def test_windows_integrity_route_hashes_tiny_fixture_with_explicit_opt_in(tmp_path, monkeypatch):
+    import hashlib
+
+    contents = b"small Windows integrity fixture"
+    path = tmp_path / "model.safetensors"
+    path.write_bytes(contents)
+    identity = hashlib.sha256(contents).hexdigest()
+    data = (path.name, "vae", len(contents))
+    pairing_module = load("storage_pairing_windows")
+    routes = load("integrity_routes")
+    resolver = sys.modules[f"{PACKAGE}.integrity_resolution"]
+    loader = sys.modules[f"{PACKAGE}.integrity_loader"]
+    monkeypatch.setattr(routes, "MODELS", {identity: data})
+    monkeypatch.setattr(routes, "LOADERS", {identity: ("FixtureLoader", "name")})
+    monkeypatch.setattr(resolver, "MODELS", {identity: data})
+    monkeypatch.setattr(loader, "MODELS", {identity: data})
+    monkeypatch.setattr(loader, "LOADERS", {identity: ("FixtureLoader", "name")})
+    monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM", "1")
+
+    class Paths:
+        def get_filename_list(self, _category):
+            return [path.name]
+        def get_full_path(self, _category, _name):
+            return str(path)
+    class Loader:
+        @staticmethod
+        def INPUT_TYPES():
+            return {"required": {"name": ([path.name],)}}
+
+    # This is a native Windows file and Credential Manager test. The queue
+    # observer is a controlled stand-in; real Windows ComfyUI Manager and the
+    # Desktop/portable launch sessions still require independent testing.
+    epoch = [0]
+    service = routes.IntegrityService(Paths(), {"FixtureLoader": Loader}, lambda: "idle",
+                                      queue_epoch=lambda: ("fixture-queue", epoch[0]))
+    owner = pairing_module.WindowsOwnerPairing()
+    try:
+        token = pairing_module.read_owner_token(owner.target)
+        async def run():
+            app = web.Application()
+            start, status, cancel = routes.handlers(owner, lambda: service)
+            app.router.add_post("/integrity", start)
+            app.router.add_get("/integrity/{job}", status)
+            app.router.add_post("/integrity/{job}/cancel", cancel)
+            async with TestServer(app) as server, ClientSession() as client:
+                payload = {"id": identity, "catalog": routes.catalog_digest()}
+                async with client.post(server.make_url("/integrity"), json=payload) as response:
+                    assert response.status == 401
+                auth = {"Authorization": "Bearer " + token}
+                async with client.post(server.make_url("/integrity"), json=payload, headers=auth) as response:
+                    assert response.status == 200
+                    job = (await response.json())["job"]
+                for _ in range(200):
+                    async with client.get(server.make_url("/integrity/" + job), headers=auth) as response:
+                        state = (await response.json())["state"]
+                    if state not in {"queued", "running"}:
+                        break
+                    await asyncio.sleep(.01)
+                assert state == "checksum_matched"
+                epoch[0] += 1
+                async with client.get(server.make_url("/integrity/" + job), headers=auth) as response:
+                    assert (await response.json())["state"] == "changed"
+        asyncio.run(run())
+    finally:
+        owner.close()

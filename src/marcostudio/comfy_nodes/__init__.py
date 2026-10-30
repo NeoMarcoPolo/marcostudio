@@ -60,12 +60,16 @@ def _register_routes():
                 location = pairing.target
                 label = "credential target"
             else:
-                from .integrity_routes import handlers as integrity_handlers
                 from .storage_pairing import OwnerPairing
 
                 pairing = OwnerPairing()
                 location = pairing.path
                 label = "socket"
+            # Windows checksum hashing remains a second, independent opt-in;
+            # unsupported filesystems or Manager versions still fail closed.
+            if os.name != "nt" or os.environ.get("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM") == "1":
+                from .integrity_routes import handlers as integrity_handlers
+
                 start, status, cancel = integrity_handlers(pairing)
                 instance.routes.post("/marcostudio/integrity")(start)
                 instance.routes.get("/marcostudio/integrity/{job}")(status)

@@ -34,7 +34,9 @@ helper discards observations after restart, and discards them when it observes
 Manager queue activity or a file identity change. Other programs or weak
 filesystem metadata can hide changes. Check again after an interrupted or
 external download, and do not treat an older match as proof of current bytes.
-Windows checksum checks are currently unavailable.
+Windows checksum checks are experimental, require the additional explicit
+`MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM=1` opt-in, and are limited to NTFS
+on a fixed-type drive. Windows Desktop and portable launch flows remain unverified.
 
 ## Experimental Windows terminal launch
 
@@ -50,6 +52,8 @@ before your usual launch command:
 ```powershell
 $env:MARCOSTUDIO_ENABLE_STORAGE_PAIRING = "1"
 $env:MARCOSTUDIO_EXPERIMENTAL_WINDOWS_STORAGE = "1"
+# Optional: enable experimental model checksum checks as well.
+$env:MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM = "1"
 ```
 
 After starting ComfyUI, find `MarcoStudio storage pairing credential target:`

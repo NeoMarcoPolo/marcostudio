@@ -24,6 +24,14 @@ export async function supportsStoragePairing(address: string): Promise<boolean> 
   } catch { return false; }
 }
 
+export async function supportsIntegrityVerification(address: string): Promise<boolean> {
+  if (!canPairStorage(address)) return false;
+  try {
+    const capability = await request<{version: number; integrity_verification?: number}>(address, "/marcostudio/capabilities");
+    return capability?.version === 1 && capability.integrity_verification === 1;
+  } catch { return false; }
+}
+
 export async function storageCatalogDigest(): Promise<string> {
   const records = new Map<string, [string, string, string]>();
   for (const feature of catalog) for (const models of Object.values(feature.models)) for (const model of models) {
