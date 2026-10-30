@@ -41,6 +41,10 @@ def _identity(info: os.stat_result) -> FileIdentity:
     return FileIdentity(info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+def _identity_fields_equal(first: FileIdentity, second: FileIdentity) -> dict[str, bool]:
+    return dict(zip(FileIdentity._fields, (a == b for a, b in zip(first, second))))
+
+
 def supports_identity_cache() -> bool:
     """Whether stat-only identity is proven safe for reuse by default.
 
@@ -129,8 +133,7 @@ def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size,
             if _identity(initial) != _identity(opened):
                 if diagnose is not None:
                     diagnose({"stage": "open_identity", "equal": False,
-                              "field_equal": dict(zip(FileIdentity._fields_,
-                                  (a == b for a, b in zip(_identity(initial), _identity(opened)))))})
+                              "field_equal": _identity_fields_equal(_identity(initial), _identity(opened))})
                 return Verification("changed")
             if opened.st_size != expected_size:
                 return Verification("size_mismatch")

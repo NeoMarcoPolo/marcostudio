@@ -18,6 +18,15 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def test_identity_diagnostic_reports_only_field_comparisons():
+    first = verify.FileIdentity(1, 2, 3, 4, 5)
+    second = verify.FileIdentity(1, 2, 3, 4, 6)
+    assert verify._identity_fields_equal(first, second) == {
+        "device": True, "inode": True, "size": True,
+        "modified_ns": True, "changed_ns": False,
+    }
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows verification is deliberately unavailable")
 def test_exact_file_verifies_and_returns_matching_identity(tmp_path):
     data = b"trusted model fixture"
