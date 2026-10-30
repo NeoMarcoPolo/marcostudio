@@ -2,6 +2,7 @@ import type { Doctor, FeatureId } from "../api";
 import { getFeature, resolveTemplate, type Graph, type Model } from "./catalog";
 import { endpoint, probe, request } from "./connection";
 import { installTasks, reconcileInstalls, saveInstallTasks } from "./manager";
+import { verifiedSnapshots } from "./integrity";
 
 type Spec = [unknown, Record<string, unknown>?];
 type Definition = {input?: {required?: Record<string, Spec>; optional?: Record<string, Spec>}};
@@ -161,6 +162,12 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
       ? "Download failed. Remove the incomplete model in ComfyUI before retrying."
       : "Waiting for ComfyUI to confirm the download finished."});
   }
+  const present = result.model_requirements.filter(model => model.available);
+  const verified = await verifiedSnapshots(address, present, signal);
+  for (const model of present) if (!verified.has(model.sha256)) result.checks.push({
+    name: `integrity:${model.key}`, status: "fail",
+    message: `${model.filename} was found but its integrity has not been verified.`,
+  });
   result.ready = !result.checks.some(check => check.status === "fail");
   return result;
 }

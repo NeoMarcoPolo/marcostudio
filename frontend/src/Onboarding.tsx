@@ -7,6 +7,7 @@ import { ConnectionHelp } from "./ConnectionHelp";
 import { canInstall, installTasks, managerAvailable, reconcileInstalls, resumeDownloads, startDownloads, type InstallTask } from "./browser/manager";
 import type { Requirements } from "./browser/requirements";
 import { checkStorage, spaceGroups, supportsStoragePairing, type SpaceReport } from "./browser/modelSpace";
+import { pairIntegrity, unpairIntegrity, verifyModelSnapshots } from "./browser/integrity";
 
 export const enteredKey = () => `marcostudio.entered:${endpoint()}`;
 const formatSize = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
@@ -103,6 +104,9 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const [space, setSpace] = useState<SpaceReport | null>(null);
   const [spaceMessage, setSpaceMessage] = useState("");
   const [spaceChecking, setSpaceChecking] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const verifyAbort = useRef<AbortController | null>(null);
+  const [verificationMessage, setVerificationMessage] = useState("");
   const [installing, setInstalling] = useState(false);
   const [tasks, setTasks] = useState<InstallTask[]>(() => installTasks());
   const [selected, setSelected] = useState<string[]>([]);
@@ -131,6 +135,8 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const selectionKey = JSON.stringify([eligibleKey, chosen.map(model => [model.url, model.size] as const).sort(([a], [b]) => a.localeCompare(b))]);
   const selectedSize = chosen.reduce((total, model) => total + model.size, 0);
   const allSelected = toInstall.length > 0 && chosen.length === toInstall.length;
+  const presentModels = report?.model_requirements.filter(model => model.available) ?? [];
+  const unverified = report?.checks.some(check => check.name.startsWith("integrity:") && check.status === "fail") ?? false;
   const failures = report?.checks.filter(check => check.status === "fail" && (check.name.startsWith("node:") || check.name === "h3_pdd")) ?? [];
   const connectedHere = !!report?.connected && report.address === endpoint() && !connectionHelp && !connecting;
   const ready = !!report?.ready && !checking && connectedHere;
@@ -163,7 +169,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     dialog.current?.showModal();
-    return () => { current.current = false; document.body.style.overflow = previousOverflow; previous?.focus(); };
+    return () => { current.current = false; verifyAbort.current?.abort(); document.body.style.overflow = previousOverflow; previous?.focus(); };
   }, []);
 
   useEffect(() => { heading.current?.focus(); }, [step, view]);
@@ -294,18 +300,26 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
       {view === "setup" && step === 1 && <>
         {(!pendingDownloads || reviewModels) && <p className="requirements-summary">{missing.length > 0 && <span>{missing.length} model{missing.length === 1 ? "" : "s"} missing</span>}{missing.length > 0 && <span> · {formatSize(missing.reduce((total, model) => total + model.size, 0))}</span>}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>}
         {pendingDownloads && reviewModels && <button className="setup-back" onClick={() => setReviewModels(false)}>← Back to download progress</button>}
-        {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
-          <h3 id="missing-models-title">Missing models</h3>
-          {!pair && <p>Available disk space cannot be checked here. Check the drive where ComfyUI stores models, including extra room for temporary files.</p>}
-          {!pair && <details className="storage-pairing-help"><summary>How to enable a disk-space check</summary>
+          {!pair && <details className="storage-pairing-help"><summary>How to enable model verification and disk-space checks</summary>
             <p>Install the MarcoStudio nodes, then start ComfyUI from a terminal with <code>MARCOSTUDIO_ENABLE_STORAGE_PAIRING=1</code> before your usual launch command. This optional helper currently supports macOS and Linux; Windows and ComfyUI Desktop launch setup have not been verified.</p>
             <p>Find the MarcoStudio storage pairing socket path in the ComfyUI startup log. In a separate terminal, from the ComfyUI folder, run <code>python custom_nodes/marcostudio/storage_pairing.py &lt;socket path&gt;</code> using the same Python as ComfyUI. Paste the resulting code here. The code is visible in that terminal; restarting ComfyUI changes it.</p>
             <p>ComfyUI must allow this MarcoStudio page's origin, and your browser may ask for local-network access.</p>
           </details>}
-          {spaceSupported && !pair && <form onSubmit={event => {event.preventDefault(); if (pairInput.trim()) { setPair({address: endpoint(), token: pairInput.trim()}); setPairInput(""); }}}>
-            <label>Helper pairing code <input type="password" autoComplete="off" value={pairInput} onChange={event => setPairInput(event.target.value)}/></label>
-            <button type="submit" disabled={!pairInput.trim()}>Check disk space</button>
-          </form>}
+        {spaceSupported && !pair && <form onSubmit={event => {event.preventDefault(); if (pairInput.trim()) { try { const address = endpoint(), token = pairInput.trim(); pairIntegrity(address, token); setPair({address, token}); setPairInput(""); } catch { setVerificationMessage("Couldn't pair the helper."); } }}}>
+          <label>Helper pairing code <input type="password" autoComplete="off" value={pairInput} onChange={event => setPairInput(event.target.value)}/></label>
+          <button type="submit" disabled={!pairInput.trim()}>{missing.length ? "Check disk space" : "Pair helper"}</button>
+        </form>}
+        {pair && <button type="button" onClick={() => {verifyAbort.current?.abort(); unpairIntegrity(); setPair(null); setSpace(null); setSpaceMessage(""); void refresh();}}>Unpair helper</button>}
+        {presentModels.length > 0 && unverified && <section aria-label="Model integrity verification">
+          <p>Some model files were found but have not been verified. Verification reads the full files and can take a while. Files may change afterward.</p>
+          {!spaceSupported && <p>Enable and pair the MarcoStudio helper in ComfyUI to verify model files.</p>}
+          {pair && <button disabled={verifying || checking || queueBlocked || pendingDownloads} onClick={() => {const target = endpoint(), controller = new AbortController(); verifyAbort.current = controller; setVerifying(true); setVerificationMessage(""); void verifyModelSnapshots(target, presentModels, message => {if (current.current) setVerificationMessage(message);}, controller.signal).then(async () => {if (current.current && endpoint() === target) await refresh();}).catch(error => {if (current.current) setVerificationMessage(error instanceof Error ? error.message : "Model verification failed.");}).finally(() => {if (current.current) setVerifying(false);});}}>{verifying ? "Verifying…" : "Verify model files"}</button>}
+          {verifying && <button type="button" onClick={() => verifyAbort.current?.abort()}>Cancel verification</button>}
+          {verificationMessage && <p role="status">{verificationMessage}</p>}
+        </section>}
+        {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
+          <h3 id="missing-models-title">Missing models</h3>
+          {!pair && <p>Available disk space cannot be checked here. Check the drive where ComfyUI stores models, including extra room for temporary files.</p>}
           {pair && <div aria-live="polite">
             {!chosen.length && <p>Select models to check their destination drives.</p>}
             {spaceChecking && <p>Checking available disk space…</p>}
@@ -313,7 +327,6 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
             {spaceSummary?.groups.map((group, index) => <p key={index}>Destination {index + 1}: {formatSize(group.available)} available · {formatSize(group.needed)} selected{group.needed > group.available ? " · Not enough space" : ""}</p>)}
             {spaceSummary?.unknown && <p>Available space is unknown for some selected models. Check their destination drives.</p>}
             {spaceSummary && <p>Space can change; allow extra room for temporary files.</p>}
-            <button type="button" onClick={() => {setPair(null); setSpace(null); setSpaceMessage("");}}>Unpair</button>
           </div>}
           {!pendingDownloads && manager && toInstall.length > 0 && <label className="model-select-all"><input type="checkbox" checked={allSelected} disabled={installing || checking}
             onChange={event => { setSelected(event.target.checked ? toInstall.map(model => model.url) : []); setConfirmed(""); }}/> Select all available downloads</label>}
@@ -352,7 +365,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {tasks.some(task => task.state === "succeeded" && missing.some(model => model.url === task.model.url)) && <p>Downloaded. Restart ComfyUI when idle to load the model.</p>}
         {!reviewModels && <div className="setup-secondary"><button onClick={() => setView("requirements")}>Models and nodes</button><button onClick={() => setView("connection")}>Change address</button></div>}
       </>}
-      {view === "setup" && step === 2 && <>{recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}<button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></>}
+      {view === "setup" && step === 2 && <><p>Model files passed verification at the last check. Files can change afterward; MarcoStudio checks again before starting a task.</p>{recentTask && <DownloadProgress tasks={tasks} active={recentTask} installing={installing} resume={() => void install(true)}/>}<button className="setup-primary" disabled={!ready} onClick={() => {localStorage.setItem(enteredKey(), "true"); close();}}>Open studio</button></>}
       {view === "setup" && step !== 1 && <div className="setup-secondary"><button onClick={() => setView("connection")}>Change address</button></div>}
       {view === "requirements" && <section className="requirement-details">
           {!manager && missing.length > 0 && <p><a href="https://docs.comfy.org/manager" target="_blank" rel="noopener noreferrer">Enable ComfyUI-Manager</a> for automatic downloads, or add the files below.</p>}

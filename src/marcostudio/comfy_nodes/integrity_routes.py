@@ -27,6 +27,8 @@ def handlers(pairing, service_factory=None):
     """Return handlers using a single bounded service for this pairing instance."""
     service = None
     admission = asyncio.Lock()
+    status_lock = asyncio.Lock()
+    status_pending = 0
     headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
     def authorize(request):
@@ -94,12 +96,39 @@ def handlers(pairing, service_factory=None):
         return web.json_response({"state": state}, status=429 if state in {"busy", "cooldown"} else 503, headers=headers)
 
     async def status(request):
+        nonlocal status_pending
         if not authorize(request):
             return web.json_response({"error": "unauthorized"}, status=401, headers=headers)
         job = request.match_info.get("job", "")
         if not re.fullmatch("[A-Za-z0-9_-]{24}", job) or service is None:
             return web.json_response({"state": "unavailable"}, status=404, headers=headers)
-        state = service.status(job)
+        # Node definitions and filesystem stat may block. Limit running and
+        # waiting status work, and keep the permit until a cancelled thread exits.
+        if status_pending >= 32:
+            return web.json_response({"state": "busy"}, status=429, headers=headers)
+        status_pending += 1
+        try:
+            await status_lock.acquire()
+        except BaseException:
+            status_pending -= 1
+            raise
+        try:
+            pending = asyncio.create_task(asyncio.to_thread(service.status, job))
+        except BaseException:
+            status_lock.release()
+            status_pending -= 1
+            raise
+        def finished(task):
+            nonlocal status_pending
+            status_lock.release()
+            status_pending -= 1
+            if not task.cancelled() and task.exception() is not None:
+                logging.warning("MarcoStudio integrity status unavailable")
+        pending.add_done_callback(finished)
+        try:
+            state = await asyncio.shield(pending)
+        except Exception:
+            return web.json_response({"state": "unavailable"}, status=503, headers=headers)
         return web.json_response({"state": state or "unavailable"}, status=200 if state else 404, headers=headers)
 
     async def cancel(request):

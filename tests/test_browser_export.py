@@ -61,6 +61,9 @@ def test_manual_node_bundle_matches_source_and_is_reproducible(tmp_path):
         assert set(bundle.namelist()) == {
             "marcostudio/__init__.py", "marcostudio/h3.py", "marcostudio/LICENSE", "marcostudio/README.md",
             "marcostudio/model_storage.py", "marcostudio/model_verify.py", "marcostudio/storage_catalog.py",
+            "marcostudio/integrity_catalog.py", "marcostudio/integrity_check.py", "marcostudio/integrity_loader.py",
+            "marcostudio/integrity_manager.py", "marcostudio/integrity_resolution.py", "marcostudio/integrity_routes.py",
+            "marcostudio/integrity_service.py", "marcostudio/verification_worker.py",
             "marcostudio/storage_pairing.py", "marcostudio/storage_routes.py",
             "marcostudio/model_storage_windows.py", "marcostudio/storage_pairing_windows.py",
             "marcostudio/.marcostudio-nodes",

@@ -40,11 +40,15 @@ def test_queue_unknown_and_changed_fail_closed(tmp_path, monkeypatch):
 def test_snapshot_is_not_ready_and_failure_enforces_cooldown(tmp_path, monkeypatch):
     resolved = Resolved("resolved", tmp_path / "model", 4, "a", "model")
     monkeypatch.setattr(module, "resolve_loader_choice", lambda *_: resolved)
-    monkeypatch.setattr(module, "verify_identity", lambda *_, **__: Verification("verified"))
+    resolved.path.write_bytes(b"data")
+    file_identity = module._identity(resolved.path.stat())
+    monkeypatch.setattr(module, "verify_identity", lambda *_, **__: Verification("verified", file_identity))
     service = module.IntegrityService(None, None, lambda: "idle")
     status, job = service.submit("a")
     assert status == "accepted"
     assert wait_terminal(service, job) == "snapshot_verified"
+    resolved.path.write_bytes(b"changed")
+    assert service.status(job) == "changed"
     monkeypatch.setattr(module, "verify_identity", lambda *_, **__: Verification("hash_mismatch"))
     status, job = service.submit("a")
     assert status == "accepted"

@@ -52,12 +52,14 @@ class OwnerPairing:
                     pass
 
     def accepts(self, token):
-        return isinstance(token, str) and token.isascii() and hmac.compare_digest(token, self._token)
+        return not self._closed.is_set() and isinstance(token, str) and token.isascii() and hmac.compare_digest(token, self._token)
 
     def volume(self, device):
         return hmac.new(self._token.encode("ascii"), str(device).encode("ascii"), "sha256").hexdigest()[:24]
 
     def close(self):
+        if self._closed.is_set():
+            return
         self._closed.set()
         self._socket.close()
         self._thread.join(timeout=1)

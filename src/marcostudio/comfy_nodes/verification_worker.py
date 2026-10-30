@@ -23,6 +23,7 @@ class _Job:
     digest: str
     id: str = field(default_factory=lambda: secrets.token_urlsafe(18))
     state: str = "queued"
+    observation: Verification | None = None
     cancelled: threading.Event = field(default_factory=threading.Event)
 
 
@@ -45,9 +46,13 @@ class VerificationWorker:
             if self._active and self._pending:
                 return "busy", None
             job = _Job(identity, path, size, digest)
-            # Retain only live jobs plus most recent terminal job. No unbounded
-            # memory growth as a caller repeatedly submits requests.
-            self._results = {key: value for key, value in self._results.items() if value is self._active or value is self._pending}
+            # Bounded history lets a caller observe multiple models while
+            # preventing unbounded growth. Live jobs are never evicted.
+            while len(self._results) >= 32:
+                oldest = next((key for key, value in self._results.items() if value is not self._active and value is not self._pending), None)
+                if oldest is None:
+                    return "busy", None
+                self._results.pop(oldest)
             self._results[job.id] = job
             if self._active is None:
                 self._active = job
@@ -73,17 +78,26 @@ class VerificationWorker:
             job = self._results.get(job_id)
             return job.state if job else None
 
+    def observation(self, job_id: str):
+        """Internal snapshot only; do not expose paths or metadata to clients."""
+        with self._lock:
+            job = self._results.get(job_id)
+            if not job or job.state != "snapshot_verified" or job.observation is None:
+                return None
+            return job.identity, job.path, job.size, job.digest, job.observation
+
     def _run(self, job: _Job) -> None:
         try:
             result = self._verifier(job.path, job.size, job.digest, cancelled=job.cancelled.is_set)
             state = result.status if isinstance(result, Verification) else "unavailable"
-        except Exception:
+        except (Exception, SystemExit):
             # A failed verifier must not become success or leak local paths.
             logging.warning("MarcoStudio model verification worker failed")
             state = "unavailable"
         with self._lock:
             # Publish and cancel synchronize under the same lock.
             job.state = "cancelled" if job.cancelled.is_set() else state
+            job.observation = result if job.state == "snapshot_verified" else None
             next_job = self._pending
             self._pending = None
             self._active = next_job

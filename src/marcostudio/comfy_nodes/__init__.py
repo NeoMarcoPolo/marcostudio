@@ -48,19 +48,22 @@ def _register_routes():
     pairing = None
     if os.environ.get("MARCOSTUDIO_ENABLE_STORAGE_PAIRING") == "1":
         try:
+            from .integrity_routes import handlers as integrity_handlers
             from .storage_pairing import OwnerPairing
             from .storage_routes import storage_handler
             pairing = OwnerPairing()
-            atexit.register(pairing.close)
             instance.routes.get("/marcostudio/storage")(storage_handler(pairing))
-            from .integrity_routes import handlers as integrity_handlers
             start, status, cancel = integrity_handlers(pairing)
             instance.routes.post("/marcostudio/integrity")(start)
             instance.routes.get("/marcostudio/integrity/{job}")(status)
             instance.routes.post("/marcostudio/integrity/{job}/cancel")(cancel)
+            atexit.register(pairing.close)
             # The socket path is not a secret; only the owner-local CLI sees the token.
             logging.info("MarcoStudio storage pairing socket: %s", pairing.path)
         except (ImportError, OSError, RuntimeError):
+            if pairing is not None:
+                pairing.close()
+                pairing = None
             logging.warning("MarcoStudio storage pairing unavailable")
 
     @instance.routes.get(path)

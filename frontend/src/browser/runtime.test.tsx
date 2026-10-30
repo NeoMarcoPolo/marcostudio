@@ -6,8 +6,15 @@ import { catalog, compile, getFeature } from "./catalog";
 import { CONNECTION_KEY, discover, selectConnection } from "./connection";
 import { installTasks, managerAvailable, reconcileInstalls, startDownloads } from "./manager";
 import { checkRequirements } from "./requirements";
+import { verifiedSnapshots } from "./integrity";
 import { browserApi } from "./runtime";
 import { getAsset, uploadAsset } from "./assets";
+
+// These tests exercise the surrounding runtime with integrity already verified.
+// Integrity's missing/invalid paths are covered by its dedicated tests.
+vi.mock("./integrity", async original => ({...await original<typeof import("./integrity")>(),
+  verifiedSnapshots: vi.fn(async (_address: string, models: {sha256: string}[]) => new Set(models.map(model => model.sha256))),
+}));
 
 const blobs = vi.hoisted(() => new Map<string, Blob>());
 vi.mock("./storage", async importOriginal => ({...await importOriginal<typeof import("./storage")>(),
@@ -193,6 +200,18 @@ describe("native generation and installation recovery", () => {
     expect(upload.body.get("image").name).not.toContain("portrait");
     expect(blobs.get(`${address}:${asset.id}`)?.type).toBe("image/png");
     expect(await getAsset(asset.id)).toMatchObject({id: asset.id, width: 640, height: 480, filename: "portrait.png"});
+    expect(calls.filter(call => call.path === "/prompt")).toHaveLength(0);
+  });
+  it("refuses generation when a verified snapshot changes before submission", async () => {
+    selectConnection(address);
+    vi.mocked(verifiedSnapshots)
+      .mockImplementationOnce(async (_address, models) => new Set(models.map(model => model.sha256)))
+      .mockImplementationOnce(async () => new Set());
+    const body = {request_id: crypto.randomUUID(), feature: "create-image", source_id: null,
+      inputs: {}, settings: {...getFeature("create-image").defaults, instruction: "A cedar tree"}};
+    const result = await post<Job>("/api/jobs", body);
+    expect(result.status).toBe("failed");
+    expect(result.error).toMatch(/verification changed/i);
     expect(calls.filter(call => call.path === "/prompt")).toHaveLength(0);
   });
   it("recovers a lost prompt acknowledgement by request identity and survives a page reload", async () => {

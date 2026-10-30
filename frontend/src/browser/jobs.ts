@@ -106,6 +106,11 @@ export async function submitJob(body: Submission): Promise<SavedJob> {
       if (feature.id === "keyframes" && "guide_frames" in settings && settings.guide_frames?.length !== Object.keys(names).length) throw new Error("Set one frame number per guide image.");
       const graph = compile(feature, settings, source ? await inputName(source, address) : null, names, report.models, `MarcoStudio/${job.id}`);
       if (listJobs(address).find(item => item.id === job.id)?.status === "abandoned") return listJobs(address).find(item => item.id === job.id)!;
+      // Inputs can take time to upload. Recheck verified snapshots and loader
+      // choices immediately before sending the generation request.
+      const finalReport = await checkRequirements(body.feature, settings.mode);
+      if (finalReport.address !== address || !finalReport.ready || JSON.stringify(finalReport.models) !== JSON.stringify(report.models))
+        throw new Error("ComfyUI model verification changed. Check setup again.");
       job.status = "submitting"; job.sent = true; save(address, job);
       const response = await send<{prompt_id: string}>(address, "/prompt", {prompt: graph, prompt_id: job.id, client_id: clientId(),
         extra_data: {marcostudio: {request_id: job.id, feature: body.feature, version: feature.version}}});
