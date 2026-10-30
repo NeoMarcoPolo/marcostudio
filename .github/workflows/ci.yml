@@ -53,7 +53,7 @@ jobs:
         run: uv run --no-sync python tests/windows_cross_user_probe.py
       - name: Verify Windows storage integration on the native runner
         if: matrix.os == 'windows-latest'
-        run: uv run --no-sync python -m pytest -v tests/test_windows_storage_integration.py tests/test_storage_pairing_windows.py tests/test_model_storage_windows.py
+        run: uv run --no-sync python -m pytest -v tests/test_windows_storage_integration.py tests/test_storage_pairing_windows.py tests/test_model_storage_windows.py tests/test_model_verify_windows.py
       - run: uv run --no-sync python -m ruff check src tests
       - run: uv run --no-sync python -m build
       - name: Install and check the wheel in a clean environment
