@@ -45,6 +45,11 @@ jobs:
           python-version: '3.12'
       - run: uv sync --locked --extra dev
       - run: uv run --no-sync python -m pytest -q
+      - name: Verify Windows pairing across users on disposable runner
+        if: matrix.os == 'windows-latest'
+        env:
+          MARCO_EPHEMERAL_WINDOWS_USER_TEST: '1'
+        run: uv run --no-sync python tests/windows_cross_user_probe.py
       - run: uv run --no-sync python -m ruff check src tests
       - run: uv run --no-sync python -m build
       - name: Install and check the wheel in a clean environment
