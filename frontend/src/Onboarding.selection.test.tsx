@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Onboarding } from "./Onboarding";
 import type { Doctor } from "./api";
+import { createDownloadSnapshots, observeDownloadTasks } from "./notificationEvents";
 
 const manager = vi.hoisted(() => ({ start: vi.fn(), available: vi.fn(), tasks: vi.fn() }));
 vi.mock("./browser/manager", () => ({
@@ -25,6 +26,53 @@ beforeEach(() => {
   manager.tasks.mockReset().mockReturnValue([]); HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
 });
 describe("model download consent", () => {
+  it("announces a fast completion once when refresh observes it before submission returns", async () => {
+    const user = userEvent.setup(); let finish!: () => void;
+    manager.start.mockImplementation(() => new Promise<void>(resolve => {finish = resolve;}));
+    const snapshots = createDownloadSnapshots();
+    const events: ReturnType<typeof observeDownloadTasks> = [];
+    const onTasks = vi.fn((address, tasks, ids) => {events.push(...observeDownloadTasks(snapshots, address, tasks, ids));});
+    render(<Onboarding {...props()} onTasks={onTasks}/>);
+    await waitFor(() => expect(onTasks).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole("checkbox", {name: /Select first/})).toBeInTheDocument());
+    await user.click(screen.getByRole("checkbox", {name: /Select first/}));
+    await user.click(screen.getByRole("checkbox", {name: /I confirm downloading/}));
+    await user.click(screen.getByRole("button", {name: "Download selected"}));
+    expect(manager.start).toHaveBeenCalledOnce();
+    manager.tasks.mockReturnValue([{id: "fast-task", model: models[0], state: "succeeded"}]);
+    const previousCalls = onTasks.mock.calls.length;
+    fireEvent.focus(window);
+    await waitFor(() => expect(onTasks.mock.calls.length).toBeGreaterThan(previousCalls));
+    expect(events).toEqual([]);
+    finish();
+    await waitFor(() => expect(events).toEqual([{text: "Model download complete: first.safetensors", failure: false}]));
+    fireEvent.focus(window);
+    expect(events).toHaveLength(1);
+  });
+  it("reports task snapshots around refresh even when refresh reconciles first", async () => {
+    const pending = {id: "model-task", model: models[0], state: "queued", submittedAt: 1000};
+    const complete = {...pending, state: "succeeded", observedFinishedAt: 201000};
+    manager.tasks.mockReturnValue([pending]);
+    const onTasks = vi.fn();
+    const refresh = vi.fn(async () => {manager.tasks.mockReturnValue([complete]);});
+    render(<Onboarding {...props()} refresh={refresh} onTasks={onTasks}/>);
+    await waitFor(() => expect(onTasks.mock.calls.some(call => call[1][0]?.state === "succeeded")).toBe(true));
+    expect(onTasks.mock.calls[0][1][0].state).toBe("queued");
+  });
+  it("reports a fast terminal submission even if setup closes before the request resolves", async () => {
+    const user = userEvent.setup(); let finish!: () => void;
+    manager.start.mockImplementation(() => new Promise<void>(resolve => {finish = resolve;}));
+    const onTasks = vi.fn(); const view = render(<Onboarding {...props()} onTasks={onTasks}/>);
+    await waitFor(() => expect(screen.getByRole("checkbox", {name: /Select first/})).toBeInTheDocument());
+    await user.click(screen.getByRole("checkbox", {name: /Select first/}));
+    await user.click(screen.getByRole("checkbox", {name: /I confirm downloading/}));
+    await user.click(screen.getByRole("button", {name: "Download selected"}));
+    expect(manager.start).toHaveBeenCalledOnce();
+    view.unmount();
+    manager.tasks.mockReturnValue([{id: "fast-task", model: models[0], state: "succeeded"}]);
+    finish();
+    await waitFor(() => expect(onTasks).toHaveBeenCalledWith("http://127.0.0.1:8192", expect.any(Array), ["fast-task"]));
+  });
   it("shows sizes and submits only the explicitly selected and confirmed model", async () => {
     const user = userEvent.setup(); render(<Onboarding {...props()} />);
     await waitFor(() => expect(screen.getByRole("checkbox", {name: /Select first/})).toBeInTheDocument());

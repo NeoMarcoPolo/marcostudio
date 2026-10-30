@@ -495,6 +495,12 @@ select option { color: var(--text); background: #242629; }
 .download-tip strong { font-size: 0.85rem; }
 .download-tip p { margin: 3px 0 0; }
 .download-tip-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.notifications { position: fixed; z-index: 100; right: 16px; bottom: 16px; width: min(360px, calc(100vw - 32px)); display: grid; gap: 8px; pointer-events: none; }
+.notification-announcer { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.notification { display: flex; align-items: start; gap: 12px; justify-content: space-between; padding: 12px 14px; border: 1px solid #606764; border-radius: 10px; background: #26302b; color: #f0f6ef; box-shadow: 0 8px 28px #0006; pointer-events: auto; }
+.notification.is-failure { background: #392a2a; border-color: #a06969; }
+.notification button { flex: none; color: inherit; background: transparent; border: 0; font-size: 20px; line-height: 1; cursor: pointer; }
+.notifications > p { margin: 0; padding: 8px; border-radius: 8px; background: #26302b; color: #f0f6ef; }
 .onboarding.has-download .setup-progress { margin: 14px 0; }
 .onboarding.has-download .setup-panel { margin-bottom: 12px; }
 .onboarding.has-download footer { padding-top: 8px; }

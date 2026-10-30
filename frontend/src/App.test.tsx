@@ -79,6 +79,14 @@ const deferred = () => {
 };
 const creativeDefaults = {mode: "standard", seed: 0, instruction: "", width: 1024, height: 1024, resolution: 1024};
 let calls: { url: string; method: string; body: any }[] = [];
+it("announces a newly failed task once with its reported elapsed time", async () => {
+  history = [{...job, status: "running", outputs: []}];
+  polledJob = {...job, status: "failed", outputs: [], elapsed_seconds: 200};
+  render(<App/>);
+  await screen.findByText("Generating…");
+  expect(await screen.findByText("Relight task failed after 200s. See task history for details.", {selector: ".notification > span"}, {timeout: 5000})).toBeInTheDocument();
+  expect(screen.getAllByText("Relight task failed after 200s. See task history for details.", {selector: ".notification > span"})).toHaveLength(1);
+});
 beforeEach(() => {
   history = [];
   extraFeatures = [];

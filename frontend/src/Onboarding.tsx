@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ExternalLink, X } from "lucide-react";
 import type { Doctor, Feature, FeatureId } from "./api";
 import { getFeature } from "./browser/catalog";
@@ -83,9 +83,11 @@ export function DownloadProgress({tasks, active, installing, resume}: {
   </section>;
 }
 
-export function Onboarding({feature, featureId, doctor, checking, locked, refresh, connected, close}: {
+export function Onboarding({feature, featureId, doctor, checking, locked, refresh, connected, close, notices, onConnection, onTasks}: {
   feature?: Feature; featureId: FeatureId; doctor?: Doctor; checking: boolean; locked: boolean;
   refresh: () => Promise<void>; connected: () => Promise<void>; close: () => void;
+  notices?: ReactNode; onConnection?: (address: string, automatic?: boolean) => void;
+  onTasks?: (address: string, tasks: InstallTask[], newTaskIds?: string[]) => void;
 }) {
   const report = doctor as Requirements | undefined;
   const [address, setAddress] = useState(() => localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint());
@@ -145,17 +147,19 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
     if (!current.current || polling.current || connectionPending.current || connectionHelp || !endpoint()) return;
     polling.current = true;
     try {
+      onTasks?.(endpoint(), installTasks());
       await refresh();
+      onTasks?.(endpoint(), installTasks());
       const available = await managerAvailable();
       if (current.current) setManager(available);
       if (available && !installing) {
         const next = await reconcileInstalls();
-        if (current.current) setTasks(next);
+        if (current.current) { setTasks(next); onTasks?.(endpoint(), next); }
       }
     } catch (error) {
       if (current.current) setError(error instanceof Error ? error.message : "Couldn't check setup.");
     } finally { polling.current = false; }
-  }, [refresh, installing, connectionHelp]);
+  }, [refresh, installing, connectionHelp, onTasks]);
 
   useEffect(() => {
     void recheck();
@@ -166,14 +170,16 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
     return () => { clearInterval(timer); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
   }, [recheck]);
 
-  const choose = useCallback(async (value: string) => {
+  const choose = useCallback(async (value: string, automatic = false) => {
     selectConnection(value); setAddress(value); setCandidates([]); setTasks(installTasks(value)); setSelected([]); setConfirmed("");
+    onTasks?.(value, installTasks(value));
     setConnectionHelp(false); setError(""); setView("setup");
     await connected();
+    if (current.current) onConnection?.(value, automatic);
     const available = await managerAvailable(value);
     if (current.current) setManager(available);
-  }, [connected]);
-  const connect = useCallback(async (value?: string) => {
+  }, [connected, onConnection, onTasks]);
+  const connect = useCallback(async (value?: string, automatic = false) => {
     if (!current.current || connectionPending.current || locked || installing || unfinished.length > 0) return;
     connectionPending.current = true;
     setConnecting(true); setError("");
@@ -185,7 +191,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
       }
       const found = await discover(target);
       if (!current.current) return;
-      if (found.length === 1) await choose(found[0]);
+      if (found.length === 1) await choose(found[0], automatic);
       else { setConnectionHelp(false); setCandidates(found); }
     } catch (error) {
       if (current.current) {
@@ -198,7 +204,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   useEffect(() => {
     if (!connectionHelp) return;
     const retry = () => {
-      if (!document.hidden) void connect(localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || undefined);
+      if (!document.hidden) void connect(localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || undefined, true);
     };
     window.addEventListener("focus", retry);
     document.addEventListener("visibilitychange", retry);
@@ -206,6 +212,13 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   }, [connectionHelp, connect]);
   const install = async (resume = false) => {
     setInstalling(true); setError("");
+    const target = endpoint();
+    const existing = new Set(installTasks(target).map(task => task.id));
+    const record = () => {
+      const next = installTasks(target);
+      onTasks?.(target, next, next.filter(task => !existing.has(task.id)).map(task => task.id));
+      if (current.current) setTasks(next);
+    };
     try {
       if (resume) await resumeDownloads();
       else {
@@ -214,10 +227,11 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         await startDownloads(chosen);
         if (current.current) { setSelected([]); setConfirmed(""); }
       }
-      if (current.current) setTasks(installTasks());
-      await refresh();
+      record();
+      if (current.current) await refresh();
     } catch (error) {
-      if (current.current) { setTasks(installTasks()); setError(error instanceof Error ? error.message : "Download failed."); }
+      record();
+      if (current.current) setError(error instanceof Error ? error.message : "Download failed.");
     } finally { if (current.current) setInstalling(false); }
   };
   const tool = getFeature(featureId);
@@ -226,6 +240,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const title = view === "setup" ? ["Connect ComfyUI", `Set up ${name}`, `${name} is ready`][step]
     : view === "connection" ? "ComfyUI address" : view === "requirements" ? "Setup details" : "Model details";
   return <dialog ref={dialog} className={`onboarding${pendingDownloads && !reviewModels && view === "setup" ? " has-download" : ""}`} aria-labelledby="onboarding-title" onCancel={event => {event.preventDefault(); close();}}>
+    {notices}
     <div className="onboarding-heading"><h2 ref={heading} tabIndex={-1} id="onboarding-title">{title}</h2><button aria-label="Close setup" onClick={close}><X size={19}/></button></div>
     <ol className="setup-progress" aria-label="Setup progress">
       {["Connect", "Set up", "Ready"].map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined} className={step > index ? "complete" : ""}><span aria-hidden="true">{step > index ? <Check size={12}/> : index + 1}</span>{label}</li>)}
