@@ -14,6 +14,11 @@ SPEC.loader.exec_module(verify)
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="requires native Windows")
 
 
+@pytest.fixture(autouse=True)
+def enable_experimental_windows_checksum(monkeypatch):
+    monkeypatch.setenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM", "1")
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -82,3 +87,10 @@ def test_existing_writable_mapping_cannot_produce_false_snapshot(tmp_path):
         assert result.status in {"unavailable", "changed", "hash_mismatch"}
     finally:
         view.close()
+
+
+def test_windows_checksum_is_disabled_without_explicit_opt_in(tmp_path, monkeypatch):
+    path = tmp_path / "fixture"
+    path.write_bytes(b"a")
+    monkeypatch.delenv("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM")
+    assert verify.verify_file(path, 1, digest(b"a")).status == "unavailable"

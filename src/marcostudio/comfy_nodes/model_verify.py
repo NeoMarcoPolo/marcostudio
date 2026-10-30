@@ -190,6 +190,10 @@ def verify_file(
     ):
         return Verification("invalid_metadata")
     if os.name == "nt":
+        # Windows hashing is an unreviewed prototype; storage opt-in alone
+        # must not activate it. Native CI exercises this explicit test gate.
+        if getattr(os, "environ", {}).get("MARCOSTUDIO_EXPERIMENTAL_WINDOWS_CHECKSUM") != "1":
+            return Verification("unavailable")
         return _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size)
     try:
         initial = path.stat()
