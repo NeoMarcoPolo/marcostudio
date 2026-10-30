@@ -52,7 +52,7 @@ def supports_identity_cache() -> bool:
 
 
 def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size):
-    """Hash a local NTFS file while write and delete opens are excluded.
+    """Hash an NTFS file on a fixed-type drive while write/delete opens are excluded.
 
     This is a historical observation, not a future-load guarantee. Windows
     sharing checks do not prove that previously created writable mappings cannot
