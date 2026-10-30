@@ -128,7 +128,9 @@ def _verify_windows(path, expected_size, expected_sha256, cancelled, chunk_size,
             opened = os.fstat(stream.fileno())
             if _identity(initial) != _identity(opened):
                 if diagnose is not None:
-                    diagnose({"stage": "open_identity", "equal": False})
+                    diagnose({"stage": "open_identity", "equal": False,
+                              "field_equal": dict(zip(FileIdentity._fields_,
+                                  (a == b for a, b in zip(_identity(initial), _identity(opened)))))})
                 return Verification("changed")
             if opened.st_size != expected_size:
                 return Verification("size_mismatch")
