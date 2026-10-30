@@ -1,4 +1,5 @@
-import type { Model } from "./catalog";
+import { catalog, type Model } from "./catalog";
+import { managerType } from "./manager";
 import { request } from "./connection";
 
 export interface SpaceEntry {id: string; status: "available" | "unavailable"; available_bytes?: number; volume?: string}
@@ -23,11 +24,26 @@ export async function supportsStoragePairing(address: string): Promise<boolean> 
   } catch { return false; }
 }
 
+export async function storageCatalogDigest(): Promise<string> {
+  const records = new Map<string, [string, string, string]>();
+  for (const feature of catalog) for (const models of Object.values(feature.models)) for (const model of models) {
+    const type = managerType(model);
+    if (!type) continue;
+    const record: [string, string, string] = [model.sha256, model.filename, type];
+    const previous = records.get(model.sha256);
+    if (!/^[0-9a-f]{64}$/.test(model.sha256) || (previous && JSON.stringify(previous) !== JSON.stringify(record))) throw new Error("Disk space check unavailable.");
+    records.set(model.sha256, record);
+  }
+  const canonical = JSON.stringify([...records.values()].sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export async function checkStorage(address: string, token: string, models: Model[]): Promise<SpaceReport> {
   if (!canPairStorage(address) || !token || !models.length) throw new Error("Disk space check unavailable.");
   const ids = [...new Set(models.map(model => model.sha256))];
   if (ids.some(id => !/^[0-9a-f]{64}$/.test(id))) throw new Error("Disk space check unavailable.");
-  const query = new URLSearchParams({ids: ids.join(",")});
+  const query = new URLSearchParams({ids: ids.join(","), catalog: await storageCatalogDigest()});
   const response = await request<SpaceReport>(address, `/marcostudio/storage?${query}`, {
     headers: {Authorization: `Bearer ${token}`},
   });

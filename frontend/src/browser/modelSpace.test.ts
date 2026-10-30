@@ -1,9 +1,12 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { canPairStorage, checkStorage, spaceGroups, supportsStoragePairing } from "./modelSpace";
+import { canPairStorage, checkStorage, spaceGroups, storageCatalogDigest, supportsStoragePairing } from "./modelSpace";
 import type { Model } from "./catalog";
 const model = (id: string, size = 20) => ({sha256: id.repeat(64), size, filename: `${id}.safetensors`} as Model);
 afterEach(() => vi.unstubAllGlobals());
 describe("model destination space", () => {
+  it("matches the helper's current trusted catalog digest", async () => {
+    expect(await storageCatalogDigest()).toBe("6153b3ba42b7e2697396411fe39f6f6a6ab233983aae0bb03fa22e65c0b89500");
+  });
   it("only permits HTTPS or literal loopback HTTP for bearer tokens", () => {
     for (const address of ["http://127.0.0.1:8188", "http://[::1]:8188", "https://comfy.example"]) expect(canPairStorage(address)).toBe(true);
     for (const address of ["http://127.1:8188", "http://localhost:8188", "http://192.168.1.2:8188", "https://user:password@comfy.example", "file:///etc"]) expect(canPairStorage(address)).toBe(false);
