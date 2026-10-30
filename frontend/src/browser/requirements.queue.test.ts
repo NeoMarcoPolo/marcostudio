@@ -8,6 +8,7 @@ vi.mock("./catalog", () => ({
 }));
 vi.mock("./connection", () => ({
   endpoint: () => "http://127.0.0.1:8188",
+  currentConnectionGeneration: () => 0,
   probe: async () => {},
   request: async (_address: string, path: string) => path === "/object_info/Loader"
     ? {Loader: {input: {required: {name: [["model.safetensors"]]}}}} : {},

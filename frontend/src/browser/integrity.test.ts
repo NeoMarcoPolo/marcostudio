@@ -2,7 +2,7 @@ import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { catalog } from "./catalog";
 import { selectConnection } from "./connection";
-import { allowUnverified, allowsUnverified, clearUnverified, currentIntegrityPair, integrityBusy, pairIntegrity, unpairIntegrity, verifiedSnapshots, verifyModelSnapshots } from "./integrity";
+import { allowUnverified, allowsUnverified, clearUnverified, currentIntegrityPair, failureScope, integrityBusy, pairIntegrity, unpairIntegrity, verifiedSnapshots, verifyModelSnapshots } from "./integrity";
 
 const address = "http://127.0.0.1:8196";
 const model = catalog[0].models.flash[0];
@@ -87,7 +87,9 @@ it("keeps a known checksum failure blocked after unpairing", async () => {
 it("keeps a pair across modal lifetimes and clears it on unpair or address change", () => {
   pairIntegrity(address, "owner-secret");
   expect(currentIntegrityPair(address)?.token).toBe("owner-secret");
+  selectConnection("http://127.0.0.1:8197");
   expect(currentIntegrityPair("http://127.0.0.1:8197")).toBeUndefined();
+  selectConnection(address);
   expect(currentIntegrityPair(address)).toBeUndefined();
   pairIntegrity(address, "owner-secret");
   unpairIntegrity();
@@ -108,7 +110,9 @@ it("invalidates consent when the connection or helper instance changes", async (
   await integrityBusy(address);
   expect(allowsUnverified(address, other.sha256)).toBe(false);
   await allowUnverified(address, [other]);
+  selectConnection("http://127.0.0.1:8197");
   currentIntegrityPair("http://127.0.0.1:8197");
+  selectConnection(address);
   currentIntegrityPair(address);
   expect(allowsUnverified(address, other.sha256)).toBe(false);
 });
@@ -177,4 +181,40 @@ it("does not restore stale consent after a deferred A→B→A connection change"
   release(new Response(null, {status: 404}));
   await expect(pending).rejects.toThrow(/connection or pairing changed/);
   expect(allowsUnverified(address, other.sha256)).toBe(false);
+});
+
+
+it("does not let a deferred A failure lookup unpair a newer B connection", async () => {
+  vi.stubGlobal("crypto", webcrypto);
+  const firstModel = {...model, sha256: "e".repeat(64)};
+  const otherAddress = "http://127.0.0.1:8197";
+  let release!: (response: Response) => void;
+  let started!: () => void;
+  const requestStarted = new Promise<void>(resolve => {started = resolve;});
+  vi.stubGlobal("fetch", vi.fn(() => {started(); return new Promise<Response>(resolve => {release = resolve;});}));
+  pairIntegrity(address, "first-secret");
+  const pending = failureScope(address, [firstModel]);
+  await requestStarted;
+  selectConnection(otherAddress);
+  pairIntegrity(otherAddress, "second-secret");
+  release(new Response(JSON.stringify({failed: [firstModel.sha256]}), {status: 200}));
+  expect(await pending).toBe("unknown");
+  expect(currentIntegrityPair(otherAddress)?.token).toBe("second-secret");
+  expect(localStorage.getItem("marcostudio.integrity.failure.v2:" + encodeURIComponent(address) + ":" + firstModel.sha256)).toBeNull();
+});
+
+it("does not let a late A capability failure clear B's consent", async () => {
+  const other = {...model, sha256: "f".repeat(64)};
+  const b = "http://127.0.0.1:8197";
+  let release!: (response: Response) => void;
+  vi.stubGlobal("fetch", vi.fn((url: string) => String(url).startsWith(address)
+    ? new Promise<Response>(resolve => {release = resolve;})
+    : Promise.resolve(new Response(null, {status: 404}))));
+  const stale = integrityBusy(address);
+  selectConnection(b);
+  await allowUnverified(b, [other]);
+  expect(allowsUnverified(b, other.sha256)).toBe(true);
+  release(new Response(null, {status: 503}));
+  expect((await stale).state).toBe("unknown");
+  expect(allowsUnverified(b, other.sha256)).toBe(true);
 });
