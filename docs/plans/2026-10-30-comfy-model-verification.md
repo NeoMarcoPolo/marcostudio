@@ -30,6 +30,10 @@ Bundle a deterministic trusted catalog with both the browser node ZIP and CLI no
 
 Verify a valid fixture, truncated file, same-size corrupt file, missing file, path traversal, duplicate roots, symlinks, changed file during hash, repeated/concurrent requests, helper unavailable/version mismatch, browser refresh, active downloads, and manual-only installations. Test actual browser-to-helper behavior using an isolated ComfyUI test copy and small synthetic fixtures, never the production installation. Measure bounded worker concurrency and ensure long hashes do not block normal health or queue requests. Regenerate and compare the node ZIP, catalog and application bundle.
 
+## Destination disk space
+
+MarcoStudio submits `save_path: "default"` (`frontend/src/browser/manager.ts:121-122`). The installed Manager maps each type and chooses the first configured directory (`comfyui_manager/glob/utils/model_utils.py:57-64`); selected types can be on different volumes. A future authenticated helper should resolve each selected catalog model through that same runtime mapping and report free bytes per destination volume without returning paths. If a destination is missing, inaccessible, ambiguous or unsupported, return unknown; do not substitute browser storage quota or the frontend machine's disk. Sum selected bytes per volume, warn with headroom, and recheck before starting; free space is time-sensitive and never guarantees a download will succeed. Test multiple volumes, missing ancestors, permissions, configured overrides, race/failure handling, and no path disclosure. An offline helper can be tested independently, but no new endpoint ships until the pairing/security gates above are proven.
+
 ## Rollout and rollback
 
 Develop and review in isolation; users install/update the helper and restart ComfyUI only when they choose. Explain the helper requirement and verification cost, then recheck. Roll back by reverting the feature commit and redeploying the earlier package; do not delete user models or nodes. The public PR and deployment are separate states.
