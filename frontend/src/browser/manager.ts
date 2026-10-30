@@ -89,8 +89,7 @@ export async function reconcileInstalls(address = endpoint()) {
   return installTasks(address);
 }
 
-export async function startDownloads(models: Model[]) {
-  const address = endpoint();
+export async function startDownloads(models: Model[], address = endpoint()) {
   const run = () => installModels(address, models);
   return navigator.locks ? await navigator.locks.request(`marcostudio:downloads:${address}`, run) : run();
 }

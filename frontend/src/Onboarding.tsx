@@ -258,7 +258,8 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
           if (summary.groups.some(group => group.needed > group.available)) throw new Error("Not enough available disk space for the selected models. Free space and check again.");
           if (current.current) setSpace(fresh);
         }
-        await startDownloads(chosen);
+        if (endpoint() !== target) throw new Error("ComfyUI connection changed. Check the models and disk space again.");
+        await startDownloads(chosen, target);
         if (current.current) { setSelected([]); setConfirmed(""); }
       }
       record();
@@ -296,6 +297,11 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         {(!pendingDownloads || reviewModels) && missing.length > 0 && <section className="model-selection" aria-labelledby="missing-models-title">
           <h3 id="missing-models-title">Missing models</h3>
           {!pair && <p>Available disk space cannot be checked here. Check the drive where ComfyUI stores models, including extra room for temporary files.</p>}
+          {!pair && <details className="storage-pairing-help"><summary>How to enable a disk-space check</summary>
+            <p>Install the MarcoStudio nodes, then start ComfyUI from a terminal with <code>MARCOSTUDIO_ENABLE_STORAGE_PAIRING=1</code> before your usual launch command. This optional helper currently supports macOS and Linux; Windows and ComfyUI Desktop launch setup have not been verified.</p>
+            <p>Find the MarcoStudio storage pairing socket path in the ComfyUI startup log. In a separate terminal, from the ComfyUI folder, run <code>python custom_nodes/marcostudio/storage_pairing.py &lt;socket path&gt;</code> using the same Python as ComfyUI. Paste the resulting code here. The code is visible in that terminal; restarting ComfyUI changes it.</p>
+            <p>ComfyUI must allow this MarcoStudio page's origin, and your browser may ask for local-network access.</p>
+          </details>}
           {spaceSupported && !pair && <form onSubmit={event => {event.preventDefault(); if (pairInput.trim()) { setPair({address: endpoint(), token: pairInput.trim()}); setPairInput(""); }}}>
             <label>Helper pairing code <input type="password" autoComplete="off" value={pairInput} onChange={event => setPairInput(event.target.value)}/></label>
             <button type="submit" disabled={!pairInput.trim()}>Check disk space</button>

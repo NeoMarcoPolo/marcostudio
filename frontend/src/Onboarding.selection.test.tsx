@@ -82,7 +82,7 @@ describe("model download consent", () => {
     await user.click(screen.getByRole("checkbox", {name: /Select first/})); expect(button).toBeDisabled();
     await user.click(screen.getByRole("checkbox", {name: /I confirm downloading/})); expect(button).toBeEnabled();
     await user.click(button); await waitFor(() => expect(manager.start).toHaveBeenCalledOnce());
-    expect(manager.start).toHaveBeenCalledWith([models[0]]);
+    expect(manager.start).toHaveBeenCalledWith([models[0]], "http://127.0.0.1:8192");
   });
   it("keeps a selection when returning from model details", async () => {
     const user = userEvent.setup(); render(<Onboarding {...props()} />);
