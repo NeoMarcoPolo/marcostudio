@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import ipaddress
 import json
+import logging
 import re
 from urllib.parse import urlsplit
 
@@ -47,8 +48,23 @@ def storage_handler(pairing):
         models = []
         for identity in ids:
             model = MODELS.get(identity)
-            async with worker:
-                observation = await asyncio.to_thread(manager_default_space, *model) if model else None
+            observation = None
+            if model:
+                await worker.acquire()
+                try:
+                    probe = asyncio.create_task(asyncio.to_thread(manager_default_space, *model))
+                except BaseException:
+                    worker.release()
+                    raise
+                # Cancellation cannot stop a running thread. Release only when
+                # that thread exits, even if its HTTP client has disconnected.
+                def release_probe(task):
+                    worker.release()
+                    if not task.cancelled() and task.exception() is not None:
+                        logging.warning("MarcoStudio storage observation failed")
+
+                probe.add_done_callback(release_probe)
+                observation = await asyncio.shield(probe)
             item = {"id": identity, "status": "unavailable"}
             if observation and observation.status == "available" and observation.device is not None:
                 item.update(status="available", available_bytes=observation.available_bytes,

@@ -67,3 +67,42 @@ def test_authorization_and_bounded_catalog(monkeypatch):
             async with client.get(url, headers={"Authorization": "Bearer correct", "Host": "remote.example"}) as resp:
                 assert resp.status == 401
     asyncio.run(run())
+
+
+def test_cancelled_request_keeps_worker_slot_until_thread_exits(monkeypatch):
+    import threading
+
+    identity = "b" * 64
+    monkeypatch.setattr(routes, "MODELS", {identity: ("a.safetensors", "vae")})
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def probe(*args):
+        calls.append(args)
+        entered.set()
+        assert release.wait(2)
+        return SimpleNamespace(status="unavailable")
+
+    monkeypatch.setattr(routes, "manager_default_space", probe)
+    pairing = SimpleNamespace(accepts=lambda token: token == "correct", volume=lambda device: "opaque")
+    handler = routes.storage_handler(pairing)
+    request = SimpleNamespace(scheme="http", host="127.0.0.1:8188", remote="127.0.0.1",
+                              headers={"Authorization": "Bearer correct"},
+                              query={"ids": identity, "catalog": routes.catalog_digest()})
+
+    async def run():
+        first = asyncio.create_task(handler(request))
+        assert await asyncio.to_thread(entered.wait, 1)
+        first.cancel()
+        try:
+            await first
+        except asyncio.CancelledError:
+            pass
+        second = asyncio.create_task(handler(request))
+        await asyncio.sleep(0.05)
+        assert len(calls) == 1
+        release.set()
+        await second
+        assert len(calls) == 2
+    asyncio.run(run())
