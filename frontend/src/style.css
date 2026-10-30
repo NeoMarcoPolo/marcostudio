@@ -77,6 +77,13 @@ main { padding: 0 16px 16px; }
 .status-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .service-state.ready .status-dot { background: var(--accent); }
 .service-state button { padding: 4px 7px; font-size: 11px; }
+.setup-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid #8a7040; border-radius: 10px; background: #30291d; color: #f5ead2; }
+.setup-banner > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; }
+.setup-banner strong { color: #ffdc91; font-size: 14px; }
+.setup-banner span { color: #e4d8c4; font-size: 13px; }
+.setup-banner button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 38px; padding: 7px 13px; border: 1px solid #c7a95e; background: #e3c277; color: #211b10; font-weight: 650; }
+.setup-banner button:focus-visible { outline: 2px solid #fff0bd; outline-offset: 3px; }
+.setup-banner ~ .studio-grid { height: calc(100dvh - 190px); }
 .studio-grid {
   display: grid; grid-template-columns: 64px minmax(0, 1fr) 328px;
   grid-template-rows: minmax(0, 1fr); gap: 16px; height: calc(100dvh - 120px); min-height: 580px;
@@ -325,6 +332,10 @@ select option { color: var(--text); background: #242629; }
   .tool-menu, .nav-group:last-child .tool-menu { left: 0; right: 0; top: calc(100% + 5px); width: 100%; max-height: min(420px, 70dvh); overflow-y: auto; overscroll-behavior: contain; }
   main { padding: 0 max(10px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
   .page-heading { min-height: 44px; }
+  .setup-banner { align-items: flex-start; gap: 10px; padding: 11px 12px; }
+  .setup-banner > div { display: grid; gap: 3px; }
+  .setup-banner button { min-height: 44px; padding: 8px 10px; }
+  .setup-banner ~ .studio-grid { height: auto; }
   .service-state { font-size: 9px; max-width: 165px; text-align: right; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
   .breadcrumb { font-size: 11px; gap: 5px; }
   .breadcrumb h1 { font-size: 11px; }

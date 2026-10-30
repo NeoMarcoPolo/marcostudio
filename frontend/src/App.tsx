@@ -548,7 +548,7 @@ export default function App() {
             <span>{toolGroup(featureId)}</span><ChevronRight size={13} aria-hidden="true" />
             <h1>{feature?.name ?? "Relight"}</h1>
           </div>
-          <div
+          {(checking || doctor?.ready || activeJob || posting) && <div
             className={`service-state ${!activeJob && !posting && doctor?.ready ? "ready" : ""}`}
             role="status"
             aria-label="Studio status"
@@ -563,13 +563,12 @@ export default function App() {
                   : doctor?.ready
                     ? "ComfyUI connected"
                     : "Setup needed"}
-            {!checking && !doctor?.ready && (
-              <button disabled={!studio} onClick={() => setShowSettings(true)}>
-                Open setup
-              </button>
-            )}
-          </div>
+          </div>}
         </div>
+        {!checking && !doctor?.ready && <section className="setup-banner" aria-label="Setup needed">
+          <div><strong>Setup needed</strong><span>Finish setup to use {feature?.name ?? "Relight"}.</span></div>
+          <button disabled={!studio} onClick={() => setShowSettings(true)}>Open setup <ArrowUpRight size={15} aria-hidden="true"/></button>
+        </section>}
         {(error || retry) && (
           <div className="error-banner" role="alert">
             <span>{error}</span>
