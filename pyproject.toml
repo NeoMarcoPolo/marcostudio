@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "marcostudio"
 version = "0.1.0a1"
-description = "A local creative studio. Relight images and remove backgrounds with ComfyUI."
+description = "13 image and video tools that run on your own ComfyUI with open-weight models."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

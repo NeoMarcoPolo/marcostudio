@@ -1,208 +1,243 @@
 # MarcoStudio
 
+Relight photos, change outfits, remove backgrounds, and make videos with your own ComfyUI.
+
+**[Open MarcoStudio](https://neomarcopolo.co/marcostudio/)** · [Tools](#tools) · [Get started](#get-started) · [Run locally](#run-locally)
+
 [![CI](https://github.com/NeoMarcoPolo/marcostudio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/NeoMarcoPolo/marcostudio/actions/workflows/ci.yml)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
 [![MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-An open-source interface for your local ComfyUI. MarcoStudio provides the controls and workflows; your running ComfyUI generates the images and videos.
+![Animate Image in MarcoStudio: the source frame and prompt on the left, with the generated portrait video playing on the right](assets/readme/studio.webp)
 
-**Install and start ComfyUI on your computer before starting MarcoStudio.** Keep it running while you use the studio.
+**ComfyUI must be installed and running on your computer.** MarcoStudio supplies the interface and workflows; your ComfyUI runs them. No MarcoStudio account or credits.
 
-No MarcoStudio account or credits. The [application and workflow source](https://github.com/NeoMarcoPolo/marcostudio) are public; workflow definitions live in [src/marcostudio/features](src/marcostudio/features).
+<table>
+<tr>
+<td width="50%"><img src="assets/readme/relight.png" alt="Relight: a generated portrait beside light direction, softness, brightness and color controls"><br><b>Relight.</b> Set the light direction, softness, brightness and color.</td>
+<td width="50%"><img src="assets/readme/ai-stylist.png" alt="AI Stylist: a portrait wearing a red satin jacket, with the outfit reference below"><br><b>AI Stylist.</b> Give it a person and an outfit reference.</td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/readme/remove-background.png" alt="Remove Background: the portrait cutout shown against a transparency checkerboard"><br><b>Remove Background.</b> Download a transparent PNG.</td>
+<td width="50%"><img src="assets/readme/product-scene.png" alt="Product Scene: a blue ceramic mug in a generated product photograph"><br><b>Product Scene.</b> Place a product in a scene described by a prompt or reference.</td>
+</tr>
+</table>
 
-## Start ComfyUI first
+These are actual MarcoStudio runs.
 
-1. **Install ComfyUI.** Get [ComfyUI Desktop](https://comfy.org/download), or follow the official [portable/manual installation guide](https://docs.comfy.org/installation/system_requirements). Skip this if you already have it installed.
-2. **Start ComfyUI.** Open the app or run your installation's launcher. Wait for startup to finish.
-3. **Check it opens.** Open the local address shown by ComfyUI in your browser and confirm its editor loads. Keep that address for MarcoStudio's connection settings.
+## Tools
 
-Leave ComfyUI running, then [open MarcoStudio](https://neomarcopolo.co/marcostudio/) or [run it locally](#run-the-current-alpha-windows). MarcoStudio checks the models and nodes needed for the tool you choose.
+| Tool | Inputs | Model | Modes |
+| --- | --- | --- | --- |
+| Relight | Photo + light controls | Qwen Image Edit 2509 + Relight | Flash |
+| Remove Background | Photo | Qwen Image 2.1 | Standard |
+| Create Image | Prompt | Qwen Image 2.1 | Standard / Flash |
+| Edit Image | Photo + prompt + up to three references | Qwen Image 2.1 | Standard / Flash |
+| AI Stylist | Person + outfit reference | Qwen Image 2.1 | Standard / Flash |
+| Product Scene | Product + scene prompt or reference | Qwen Image 2.1 | Standard / Flash |
+| Create Video | Prompt | MiniMax H3 | Standard / Flash |
+| Animate Image | First frame + prompt | MiniMax H3 | Standard / Flash |
+| Transition | First and last frames + prompt | MiniMax H3 | Standard / Flash |
+| Restyle Video | Video + prompt + optional image references | MiniMax H3 OmniRef | Standard / Flash |
+| Replace Person | Video + person reference | MiniMax H3 + Character Swap V1.5 | Standard (eight steps) |
+| Keyframes | First frame + one to three timed images + prompt | MiniMax H3 OmniRef | Standard |
+| Motion Control | Video + prompt + optional edit mask | MiniMax H3 | Standard |
 
-## Use your ComfyUI
+Flash uses eight-step Qwen Turbo or FastH3 checkpoints; Relight uses a four-step adapter. Download only what you use.
 
-Open the [website](https://neomarcopolo.co/marcostudio/) with ComfyUI running. Setup shows one step at a time:
+**Status: alpha.** The tools are experimental. GPU memory and generation time depend on the workflow and your ComfyUI setup; a minimum VRAM requirement has not been established. Model licenses are separate from the application's MIT license—see [License](#license).
 
-1. **Connect** — allow local-network access if your browser asks. If ComfyUI is open but the connection fails, choose **It's already running**, then **Desktop**, **Portable**, or **Terminal** for the one-time website permission fix.
-2. **Set up** — install the missing models or open ComfyUI to fix missing nodes. Requirements are under **Models and nodes**.
-3. **Ready** — open the studio.
+## Model downloads
 
-MarcoStudio connects directly to your ComfyUI; no MarcoStudio server or proxy is needed. Future visits reconnect and skip completed setup. Your media stays between your browser and ComfyUI.
+Total model files per tool and mode, in GB (10⁹ bytes), from the [model catalog](frontend/src/browser/catalog.json):
+
+| Tool | Standard | Flash |
+| --- | ---: | ---: |
+| Relight | – | 31.2 GB |
+| Remove Background | 17.3 GB | – |
+| Create Image | 17.3 GB | 17.3 GB |
+| Edit Image | 17.3 GB | 17.3 GB |
+| AI Stylist | 17.3 GB | 17.3 GB |
+| Product Scene | 17.3 GB | 17.3 GB |
+| Create Video | 53.9 GB | 55.1 GB |
+| Animate Image | 53.9 GB | 55.1 GB |
+| Transition | 53.9 GB | 55.1 GB |
+| Restyle Video | 53.9 GB | 55.2 GB |
+| Replace Person | 44.6 GB | – |
+| Keyframes | 53.9 GB | – |
+| Motion Control | 58.5 GB | – |
+
+Tools share files, and setup reuses files ComfyUI already has. Each file is downloaded once:
+
+- The five Qwen Image 2.1 tools use the same Standard files: 17.3 GB for all five, 24.5 GB with Flash.
+- The video tools share the H3 text encoder and VAEs: 141.6 GB for all seven in every mode.
+- Relight's files are separate. All 13 tools in every mode: 197.3 GB.
+
+## Get started
+
+1. **Start ComfyUI.** Install [ComfyUI Desktop](https://comfy.org/download) or use an existing [portable/manual installation](https://docs.comfy.org/installation/system_requirements). Confirm its editor opens in your browser and leave it running.
+2. **[Open MarcoStudio](https://neomarcopolo.co/marcostudio/) and connect.** Allow local-network access if your browser asks. Setup checks the models and nodes for your selected tool.
+3. **Finish the missing requirements, then open the studio.** Install models from setup; **Models and nodes** lists anything that needs attention. Completed steps are skipped on your next visit.
+
+Your browser connects directly to your ComfyUI. The website needs no MarcoStudio server or proxy, and your media stays between your browser and ComfyUI.
 
 <details>
-<summary>Allow website access in ComfyUI</summary>
+<summary>ComfyUI is running, but the website cannot connect</summary>
 
-The connection screen provides a copy button and the instruction for your launcher. Add this option once, keeping your existing options:
+Choose **It's already running** in setup, then select your launcher. It gives you this option to copy:
 
 ```text
 --enable-cors-header https://neomarcopolo.co
 ```
 
-| How you start ComfyUI | Where to add it |
+Append it to your existing ComfyUI startup options:
+
+| Launcher | Where |
 | --- | --- |
-| Comfy Desktop | Instance ⋮ menu → **Manage → Startup Args → Startup Arguments** |
-| Windows portable | Edit your usual `.bat` launcher; append it to the line containing `ComfyUI\main.py` |
-| Terminal | Append it to your usual ComfyUI launch command |
+| Desktop | Instance ⋮ → **Manage → Startup Args → Startup Arguments** |
+| Windows portable | Your `.bat` launcher, on the line containing `ComfyUI\main.py` |
+| Terminal | Your usual ComfyUI launch command |
 
-Restart ComfyUI when idle, then return to MarcoStudio. It checks again automatically; **Try again** also retries immediately.
+Restart ComfyUI when its queue is idle, then return to MarcoStudio and retry. Also allow local-network access in your browser's site settings.
 
-Running the frontend at another origin? Copy the option shown in that page's setup panel. See the [startup flags reference](https://docs.comfy.org/development/comfyui-server/startup-flags) and [Desktop Startup Args guide](https://docs.comfy.org/installation/desktop/usage/manage#startup-args-tab).
+For a locally hosted MarcoStudio, copy the option shown by that page's setup screen—it uses that page's origin. [ComfyUI startup flags](https://docs.comfy.org/development/comfyui-server/startup-flags) · [Desktop startup arguments](https://docs.comfy.org/installation/desktop/usage/manage#startup-args-tab).
 
 </details>
 
 <details>
-<summary>Connection and automatic setup</summary>
+<summary>Models, custom nodes, and another ComfyUI address</summary>
 
-Connection checks the usual local ports, 8188 and 8000. **Change address** accepts another ComfyUI address, preserves it across refresh, and selects it only after ComfyUI responds. On another computer or a phone, enter the address that opens ComfyUI on that device instead of its own localhost.
+- Setup checks Relight first by default; other tools are checked when selected.
+- Automatic model downloads use **ComfyUI-Manager 4**. Setup shows download sizes, reuses matching files, and writes to ComfyUI's configured model folders. Without Manager, already installed tools still work.
+- Custom node installation is currently manual. Update built-in nodes through ComfyUI. Restyle Video, Motion Control and Replace Person also need MarcoStudio's video nodes: download them from **Models and nodes**. They are not yet in the Comfy registry. Restart ComfyUI when idle after installing nodes.
+- FastH3 OmniRef needs [ComfyUI's PDD support](https://github.com/Comfy-Org/ComfyUI/commit/ce42de5f64ac1d421e304ab7b6c0b3d2f0dde1f6). Setup checks the running implementation.
+- Connection checks local ports **8188** and **8000**. Use **Change address** for another port or machine. On a phone, use the address that opens ComfyUI from that phone.
+- Readiness checks node contracts and model names. The Python CLI's `doctor --verify-hashes` also verifies model file checksums.
 
-Setup checks your starting tool, Relight by default; other tools can be set up when you use them. Model downloads show their size before you install, reuse matching files, and go into ComfyUI's configured folders.
-
-Automatic downloads use **ComfyUI-Manager 4** on the same connection. If it is unavailable, tools whose requirements are already installed still work. Help appears only when a missing requirement needs it.
-
-Automatic setup currently downloads models only. Update built-in nodes in ComfyUI; MarcoStudio's video nodes have a download under **Models and nodes**. They are not yet published in the Comfy registry, so automatic node installation is unavailable. Restart ComfyUI yourself when its queue is idle; the panel reconnects and checks again. Onboarding never restarts ComfyUI or submits a generation.
-
-The browser stores its connection, uploads, and job references locally and recovers job status after refresh. Unknown submission results are checked against ComfyUI's queue/history without resubmitting. Clearing browser data removes those local records; save results you want to keep. The optional Python application stores its own media and history separately.
-
-Readiness checks loaded node contracts and model names visible in ComfyUI. It does not verify file checksums. Relight model downloads were checked on a fresh Windows installation with ComfyUI 0.42.0 and Manager 4.2.2. Hosted HTTPS browser permissions still need release validation.
+Setup never restarts ComfyUI or submits a generation.
 
 </details>
 
-## Tools
+## Run locally
 
-| Tool | Inputs | Model / mode |
-| --- | --- | --- |
-| Relight | Image + light controls | Qwen Image Edit 2509 + Relight, Flash |
-| Remove Background | Image | Qwen Image 2.1, Standard; transparent PNG |
-| Create Image | Prompt | Qwen Image 2.1, Standard / Flash |
-| Edit Image | Image + prompt + up to three references | Qwen Image 2.1, Standard / Flash |
-| AI Stylist | Person + outfit reference + optional instructions | Qwen Image 2.1, Standard / Flash |
-| Product Scene | Product + scene prompt or reference | Qwen Image 2.1, Standard / Flash |
-| Create Video | Prompt | MiniMax H3, Standard / Flash |
-| Animate Image | First frame + prompt | MiniMax H3, Standard / Flash |
-| Transition | First and last frames + prompt | MiniMax H3, Standard / Flash |
-| Restyle Video | Video + prompt + optional image references | MiniMax H3 OmniRef, Standard / Flash |
-| Replace Person | Video + character reference | MiniMax H3 + Character Swap V1.5, eight steps |
-| Keyframes | First frame + one to three timed images + prompt | MiniMax H3 OmniRef, Standard |
-| Motion Control | Video + prompt + optional edit mask | MiniMax H3, Standard |
+Start ComfyUI first. To run the frontend on your computer, you need Git and Node 22.12+:
 
-Flash uses eight-step Qwen Turbo or FastH3 checkpoints; Relight uses its four-step adapter. Standard and Flash have separate model downloads. Image/video generation quality and performance depend on your runtime and inputs; this expanded tool set is experimental.
+```sh
+git clone https://github.com/NeoMarcoPolo/marcostudio.git
+cd marcostudio/frontend
+npm ci
+npm run dev
+```
 
-Download only the models for the tools you use. Qwen Image 2.1 weights use the [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE), which permits research and evaluation; commercial use requires a separate license. MarcoStudio's application code remains MIT licensed.
+Open the printed address with `?runtime=browser` appended, then connect to ComfyUI. The same setup flow handles the connection and missing requirements.
 
-Video tools are Powered by MiniMax H3. H3 and Character Swap weights have separate [model license terms](https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/blob/96ea3407b230b6f7df71c58c70e31df96bd7e533/LICENSE).
+<details>
+<summary>Optional Python application and CLI (Windows)</summary>
 
-## Run the current alpha (Windows)
+This version includes the interface, a local API, file storage and job history. Node is not required. You need Python 3.12+, a running ComfyUI, and FFmpeg/FFprobe on `PATH` for video tools.
 
-Complete [Start ComfyUI first](#start-comfyui-first) above. These instructions run the optional Python application, with its local file storage and CLI. To run just the website locally, see [Development](#development).
-
-You need:
-
-- Git and Python 3.12+.
-- Your local ComfyUI running in its own environment.
-- For video tools, FFmpeg and FFprobe available on `PATH`.
-- Space for the selected tool's models, dependencies and outputs. GPU memory requirements depend on your ComfyUI setup; a minimum has not been established.
-
-In PowerShell, clone the repo and configure your ComfyUI folder and address. Replace `C:\AI\ComfyUI` with the folder containing ComfyUI's `main.py`, and use the local address you checked above:
+Install the [v0.2.0 release](https://github.com/NeoMarcoPolo/marcostudio/releases/tag/v0.2.0) wheel in a new virtual environment:
 
 ```powershell
-git clone https://github.com/NeoMarcoPolo/marcostudio.git
-cd marcostudio
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\python.exe -m pip install https://github.com/NeoMarcoPolo/marcostudio/releases/download/v0.2.0/marcostudio-0.2.0-py3-none-any.whl
+```
+
+Or, from a checkout of this repository, run `py -3.12 -m venv .venv` and `.\.venv\Scripts\python.exe -m pip install .` at its root.
+
+Then configure it. Replace `C:\AI\ComfyUI` with the folder containing ComfyUI's `main.py`, and use your running ComfyUI's address:
+
+```powershell
 .\.venv\Scripts\marcostudio.exe configure --comfy-dir "C:\AI\ComfyUI" --comfy-url "http://127.0.0.1:8188"
 .\.venv\Scripts\marcostudio.exe install-nodes
 .\.venv\Scripts\marcostudio.exe models
 ```
 
-`models` lists Relight's files. Select another tool with `models --feature <tool-id>` and add `--mode flash` for its Flash checkpoints. Download from the printed URLs into the listed ComfyUI model folders. `install-nodes` copies MarcoStudio's video adapters into the configured ComfyUI folder; restart ComfyUI after installing or updating them. Use a runtime with Qwen Image 2.1 and MiniMax H3 support. FastH3 OmniRef also needs [PDD support](https://github.com/Comfy-Org/ComfyUI/commit/ce42de5f64ac1d421e304ab7b6c0b3d2f0dde1f6); `doctor` checks the running implementation before submitting these jobs.
+`models` lists Relight's download URLs and destination folders. Select another tool with `models --feature <tool-id>` and add `--mode flash` for its Flash models. Download the listed files. Restart ComfyUI when idle after `install-nodes` to load the MarcoStudio nodes.
 
-Start ComfyUI with its normal launcher. From the MarcoStudio folder, start the API proxy and leave it running:
+Start the proxy and leave it running:
 
 ```powershell
 .\.venv\Scripts\marcostudio.exe proxy
 ```
 
-In another PowerShell terminal, open the MarcoStudio folder, check setup, and start the studio:
+In a second PowerShell terminal in the same folder:
 
 ```powershell
 .\.venv\Scripts\marcostudio.exe doctor --feature relight --verify-hashes
 .\.venv\Scripts\marcostudio.exe serve
 ```
 
-Open [http://127.0.0.1:7870](http://127.0.0.1:7870). For Remove Background, check with `doctor --feature remove-background --verify-hashes`. **Check setup** in Settings checks the currently selected tool.
+Open [http://127.0.0.1:7870](http://127.0.0.1:7870). Once dependencies and models are installed, the Python application works offline. Its server accepts local connections only.
 
-The interface is included: **Node is not required to run MarcoStudio**. Once dependencies and models are installed, it works offline. The server accepts local connections only.
+</details>
 
-Prebuilt Python wheels are available in [GitHub Releases](https://github.com/NeoMarcoPolo/marcostudio/releases). To use one instead of cloning the repo, create a virtual environment and install the downloaded wheel with that environment's Python, then follow the same configuration and startup steps.
+<details>
+<summary>Python configuration and CLI examples</summary>
 
-## Using the tools
+Configuration, media and history live in your OS's MarcoStudio application-data directory, outside the checkout. Use `configure --data-dir ...` to change it for the next server start. Close the server before backing up that directory.
 
-- Upload a PNG or JPEG, up to 32 MiB and 32 megapixels.
-- **Relight:** choose direction, softness, brightness, color and seed, then click **Generate**.
-- **Remove Background:** click **Remove background** and download the transparent PNG.
-- **Image tools:** enter a prompt and add the references shown below the preview. Outfit and product references are generative guidance, not exact texture transfers.
-- **Video tools:** enter a prompt, choose size and duration, and add any required frames or source video. MP4 uploads are limited to 15 seconds and 96 MiB and are normalized locally to 24 fps. Output is MP4 with audio.
-- **Keyframes:** add guide images in order and set increasing timestamps within the output duration.
-- **Replace Person:** use a full-body reference showing the person and outfit. Processes up to five seconds and keeps the source soundtrack.
-- **Motion Control:** extract edges from a source video or use a prepared control video. Adding a mask switches to a masked edit: white replaces, black preserves. Source pixels outside the mask are composited back before MP4 encoding.
-- Compare image results, play videos, download, reuse the result, or regenerate a previous job from history.
+The Python application defaults to ComfyUI at `http://127.0.0.1:8188` and its proxy at `http://127.0.0.1:8189`. Change them in Settings or with `configure --comfy-url ... --proxy-url ...`; restart the proxy after changing its configuration.
 
-Job references survive page refreshes. Selecting a previous job restores its tool, prompt, settings, source and references. The browser reconciles those references with ComfyUI; if ComfyUI clears a pending request's history, its status may need manual resolution. PNG transparency is preserved when downloading or reusing a result.
+ComfyUI's `extra_model_paths.yaml` is discovered automatically. Add other files with `configure --extra-model-path "C:\AI\extra_model_paths.yaml"` (repeatable). To select a configuration file, put `--config <file>` before the command or set `MARCOSTUDIO_CONFIG`.
 
-Image edits can change subject details. Remove Background uses the [official Qwen Image 2.1 workflow](https://docs.comfy.org/tutorials/image/qwen/qwen-image-2-1), with an approximately 1024 × 1024 pixel budget and the source aspect ratio, rounded to multiples of 32. It does not promise pixel-identical foregrounds or original dimensions. Video durations are rounded up to H3's frame grid; the duration menu shows the resulting length.
-
-If a job's status is uncertain, check ComfyUI before submitting it again. **Resolve uncertain job** stops tracking a job after you confirm it is no longer running; it does not cancel or resubmit it. The browser can remove a queued job by ID. Cancel running jobs in ComfyUI; MarcoStudio never sends a global interrupt.
-
-## Configuration
-
-ComfyUI defaults to `http://127.0.0.1:8188`, and the API proxy to `http://127.0.0.1:8189`. Change these in Settings or with `configure --comfy-url ... --proxy-url ...`. Restart the proxy after changing its configuration.
-
-Configuration, images, and job history are stored in your operating system's MarcoStudio application-data directory, outside the source checkout. Use `configure --data-dir ...` to choose another data directory for the next server start. Close the server before backing up that directory.
-
-ComfyUI's `extra_model_paths.yaml` is discovered automatically. For other model-path files, use `configure --extra-model-path "C:\AI\extra_model_paths.yaml"` (repeatable). To select a different configuration file, put `--config <file>` before the command or set `MARCOSTUDIO_CONFIG`.
-
-## CLI
-
-These examples assume the virtual environment is activated. Otherwise use `.\.venv\Scripts\marcostudio.exe` as above.
+These commands assume the virtual environment is activated:
 
 ```powershell
 marcostudio doctor --feature relight --verify-hashes
-marcostudio doctor --feature remove-background --verify-hashes
-marcostudio models --json
-marcostudio models --feature remove-background --json
+marcostudio models --feature create-image --mode flash --json
 marcostudio run relight --input photo.png --direction front --mode flash --seed 42 --wait 600
-marcostudio run remove-background --input photo.png --seed 42 --wait 600
-marcostudio run create-image --prompt "A ceramic teapot on a wooden table" --mode flash
-marcostudio run edit-image --input photo.png --prompt "Replace the sky with sunset"
 marcostudio run ai-stylist --input person.png --asset reference_1=outfit.png
-marcostudio run product-scene --input product.png --prompt "On a marble counter beside a window"
-marcostudio run create-video --prompt "Waves breaking on a beach, ocean sound" --duration 5
 marcostudio run animate-image --input photo.png --prompt "Slow camera push forward"
-marcostudio run transition --input first.png --asset last_frame=last.png --prompt "The camera moves through the doorway"
-marcostudio run restyle-video --input clip.mp4 --prompt "Turn the scene into a watercolor animation"
-marcostudio run character-swap --input clip.mp4 --asset reference_1=person.png
-marcostudio run keyframes --input first.png --asset guide_1=middle.png --guide-frames 48 --prompt "A continuous camera move"
-marcostudio run motion-control --input clip.mp4 --prompt "A dancer on a theater stage"
 marcostudio jobs list
 marcostudio jobs show <job-id>
-marcostudio jobs cancel <job-id>
 ```
 
-`doctor` checks your runtime and the selected tool's models without downloading anything or submitting a job; `--all` checks every tool's default mode. Add `--mode flash` when checking a Flash workflow. `--verify-hashes` verifies model SHA256 hashes. `run` and `jobs` require the studio server to be running. A `--wait` timeout leaves the job running. Use `marcostudio <command> --help` for more options.
+`doctor` checks setup without downloading or generating; `--all` checks every tool's default mode. `run` and `jobs` need the studio server. A `--wait` timeout leaves the job running. Use `marcostudio <command> --help` for all options.
+
+</details>
+
+## How it works
+
+```text
+MarcoStudio in your browser → your ComfyUI → your GPU
+```
+
+The [feature registry](src/marcostudio/features) defines each tool's settings, model requirements and workflow. The frontend uses an [exported catalog](frontend/src/browser/catalog.json) to build and submit those workflows directly to ComfyUI. [Video adapters](src/marcostudio/comfy_nodes) are included in the repo.
+
+Image results support comparison, download and reuse as the next input. Videos play in the studio. Job history restores the tool, prompt, settings and references, and continues tracking after a page refresh.
+
+<details>
+<summary>Input limits and current behavior</summary>
+
+- Images: PNG/JPEG up to **32 MiB** and **32 megapixels**.
+- Video inputs: MP4 up to **15 seconds** and **96 MiB**, normalized to 24 fps. Generated durations follow H3's frame grid.
+- Remove Background uses a generative workflow at about a 1024 × 1024 pixel budget. It preserves transparency, but can change foreground details and output dimensions.
+- Outfit and product references guide generation; they do not guarantee an exact texture transfer.
+- Replace Person processes up to **five seconds**, uses a full-body person reference, and keeps source audio.
+- Keyframe timestamps must increase and stay within the output duration.
+- Motion Control accepts source edges or a prepared control video. With an edit mask, white replaces and black preserves; source pixels outside the mask are composited back.
+- Browser history is stored locally. Clearing browser data removes its records, so download results you want to keep.
+- Uncertain submissions are checked against ComfyUI's queue/history without resubmitting. Check ComfyUI before trying again; **Resolve uncertain job** ends tracking only after you confirm it is no longer running.
+- Queued jobs can be removed by ID. Cancel running jobs in ComfyUI; MarcoStudio does not send a global interrupt.
+
+</details>
 
 ## Contributing
 
-[Report bugs](https://github.com/NeoMarcoPolo/marcostudio/issues) with your OS, Python/ComfyUI versions, and reproduction steps. Remove personal paths and image data from diagnostic output before sharing it. Pull requests are welcome.
+[Report a bug](https://github.com/NeoMarcoPolo/marcostudio/issues) with your OS, ComfyUI version and steps to reproduce it. For the Python application, include its Python version too. Remove personal paths and image data from diagnostics before sharing. Pull requests are welcome.
 
-## Development
+For a new tool, start with the [feature registry](src/marcostudio/features), define its models and workflow, and add its controls in [the frontend](frontend/src). The browser catalog is generated from the Python workflows so both runtimes share the same definitions.
 
-Python dependencies are locked in `uv.lock`; frontend dependencies in `frontend/package-lock.json`. Use Python 3.12 and a Node version supported by the pinned Vite release (Node 22.12+ is suitable).
+<details>
+<summary>Development commands</summary>
+
+Use Python 3.12 and Node 22.12+. Dependencies are pinned in `uv.lock` and `frontend/package-lock.json`.
 
 ```powershell
 uv sync --locked --extra dev
 cd frontend
 npm ci
 npm run test -- --run
-npm run typecheck
 npm run build
 cd ..
 .\.venv\Scripts\python.exe -m pytest
@@ -210,12 +245,19 @@ cd ..
 .\.venv\Scripts\python.exe -m build
 ```
 
-For the website, run `npm run dev` from `frontend` and open the printed address with `?runtime=browser`. Start ComfyUI normally and connect from the setup panel. No Python application or proxy is required. `npm run build` produces the static site in `src/marcostudio/web`, ready to serve from a dedicated origin.
+Tests require no GPU. CI checks the frontend and installs the Python package on Windows, Linux and macOS.
 
-Without `?runtime=browser`, the interface uses a local MarcoStudio server if its settings API responds; otherwise it uses the browser connection. The Vite development proxy points to port 7870 for the Python application.
+After changing workflows or video nodes, run `.\.venv\Scripts\python.exe -m marcostudio.browser_export` at the repo root, then rebuild the frontend. `npm run build` includes type checking and writes the static site to `src/marcostudio/web`. Rebuild it before publishing interface changes.
 
-Workflow templates and manifests are exported from the Python feature registry. After changing a workflow or the video nodes, run `.\.venv\Scripts\python.exe -m marcostudio.browser_export` at the repo root, then rebuild the frontend. Tests check that the browser catalog matches the Python compilers. Rebuild `src/marcostudio/web` before publishing interface changes. The tests require no GPU. CI checks the frontend and installs the Python package on Windows, Linux, and macOS.
+Without `?runtime=browser`, the frontend uses a local MarcoStudio server if its settings API responds, otherwise it uses the browser connection. The Vite proxy targets port 7870 for the Python application.
+
+</details>
 
 ## License
 
-Original application code is [MIT licensed](LICENSE). See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for adapted public workflows, bundled libraries and separately provisioned model sources.
+Application code is [MIT licensed](LICENSE). Model weights are downloaded separately and have their own terms:
+
+- **Qwen Image 2.1:** the [Qwen Research License](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE) permits research and evaluation; commercial use requires a separate license.
+- **MiniMax H3:** video tools are Powered by MiniMax H3. See the [H3 and Character Swap license](https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/blob/96ea3407b230b6f7df71c58c70e31df96bd7e533/LICENSE).
+
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) lists workflow sources, bundled libraries, adapters and model licenses.
