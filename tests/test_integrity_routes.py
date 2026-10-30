@@ -105,6 +105,23 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
     monkeypatch.setattr(loader, "MODELS", {identity: model})
     monkeypatch.setattr(loader, "LOADERS", {identity: ("Loader", "name")})
 
+    # Diagnostics contain only states and equality booleans for this synthetic
+    # fixture. They distinguish the verifier, post-close stat, and service
+    # publication phases without printing paths, model data, or credentials.
+    check = sys.modules["route_test_nodes.integrity_check"]
+    verifier = sys.modules["route_test_nodes.model_verify"]
+    verify_file = check.verify_file
+    observations = []
+    def traced_verify(*args, **kwargs):
+        result = verify_file(*args, **kwargs)
+        try:
+            post_close_matches = result.identity is not None and verifier._identity(path.stat()) == result.identity
+        except OSError:
+            post_close_matches = False
+        observations.append({"verifier_status": result.status, "post_close_identity_matches": post_close_matches})
+        return result
+    monkeypatch.setattr(check, "verify_file", traced_verify)
+
     class Paths:
         def get_filename_list(self, _category):
             return ["model.bin"]
@@ -134,7 +151,13 @@ def test_real_worker_small_fixture_detects_later_change(tmp_path, monkeypatch):
                 if state not in {"running", "queued"}:
                     break
                 await asyncio.sleep(.01)
-            assert state == "checksum_matched"
+            assert state == "checksum_matched", {
+                "reported_state": state,
+                "worker_state": service._worker.status(job),
+                "verification": observations,
+                "queue_idle": service._idle(),
+                "queue_epoch_stable": service._epoch() == ("queue", 0),
+            }
             path.write_bytes(b"modified fixture")
             async with client.get(server.make_url("/status/" + job), headers=auth) as response:
                 assert (await response.json())["state"] == "changed"
