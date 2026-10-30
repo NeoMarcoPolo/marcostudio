@@ -29,9 +29,9 @@ describe("model destination space", () => {
     vi.stubGlobal("fetch", fetch);
     await expect(checkStorage("http://127.0.0.1:8188", "secret", [model("a")])).rejects.toThrow();
     const result = spaceGroups([model("a", 60), model("b", 50)], {version: 1, models: [
-      {id, status: "available", available_bytes: 100, volume: "one"}, {id: "b".repeat(64), status: "available", available_bytes: 100, volume: "one"},
+      {id, status: "available", available_bytes: 100, volume: "one"}, {id: "b".repeat(64), status: "available", available_bytes: 90, volume: "one"},
     ]});
-    expect(result.groups[0]).toMatchObject({available: 100, needed: 110});
+    expect(result.groups[0]).toMatchObject({available: 90, needed: 110});
     expect(result.unknown).toBe(false);
     expect(spaceGroups([model("a")], {version: 1, models: []}).unknown).toBe(true);
   });

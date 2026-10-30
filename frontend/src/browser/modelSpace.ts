@@ -48,8 +48,8 @@ export function spaceGroups(models: Model[], report: SpaceReport) {
     const entry = report.models.find(item => item.id === model.sha256);
     if (!entry || entry.status !== "available" || !entry.volume || entry.available_bytes === undefined) { unknown = true; continue; }
     const previous = groups.get(entry.volume);
-    if (previous && previous.available !== entry.available_bytes) { unknown = true; continue; }
     const group = previous ?? {available: entry.available_bytes, needed: 0, names: []};
+    group.available = Math.min(group.available, entry.available_bytes);
     group.needed += model.size; group.names.push(model.filename); groups.set(entry.volume, group);
   }
   return {groups: [...groups.values()], unknown};
