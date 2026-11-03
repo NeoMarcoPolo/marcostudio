@@ -2,10 +2,10 @@
 
 ## Baseline, evidence and diagnosis
 
-Baseline origin/main ac085b7d2326b91821701b5f15bcdc8fd67a9eec. The isolated queue
+Implementation baseline after queue PR9 merge: origin/main 5a14091063efa2e1bf4bedb59e23df9b63414baa. The clean plan branch was rebased before implementation. The isolated queue
 branch b52538a41a453b4a9fb6490e1f04f691666aeb78 has identical readiness code.
 Filed diagnosis: confirmed for metadata indifference, not for every Mac/Torch.
-Production diagnose with real graph/node validation and tiny verified model
+The production diagnose caller with real graph/node validation and tiny verified model
 identities returns all-pass Ready for CPU/Torch2.13, MPS/2.13 and MPS/2.15; preserve
 this as a regression fixture. Root's installed Torch2.13.0 on M4 Max reports MPS
 available but a one-element FP32 -> float8_e4m3fn cast fails Undefined type
@@ -35,7 +35,7 @@ readiness. Fail closed for this pinned FP8/LoRA profile on MPS. Distinguish know
 older-runtime failure guidance from newer FP8-capable-but-unvalidated profile
 messages. Version alone never certifies full Relight execution or memory safety.
 This is a temporary profile restriction, not a platform ban across other tools.
-Missing/malformed/ambiguous selected-device metadata for Relight is a diagnostic
+Missing/malformed selected-device metadata for Relight is a diagnostic
 failure rather than silently treating it as a supported GPU. Explicit CPU/CUDA
 metadata retains existing readiness; do not newly certify execution or memory.
 
@@ -44,7 +44,9 @@ runtime-info probe used by readiness; existing address probe wraps it for
 connection discovery. No global cached device data, extra requests or selected
 endpoint changes. Report connected=true with device failure, not connection lost.
 Use connected Comfy metadata, never browser OS or this Mac's Torch installation.
-Display only bounded/sanitized version text; no arbitrary server fields/argv.
+Recognizable browser responses retain the existing system-version/devices-array
+identity check; malformed primary records inside that array get a compatibility
+failure while connected remains true. Display only bounded/sanitized version text; no arbitrary server fields/argv.
 
 No download, model, loader, dtype, launch-flag, PyTorch-installation or helper API
 changes. No automatic CPU fallback. Users retain explicit download consent;
@@ -52,37 +54,55 @@ diagnostic explains generation readiness and does not silently change runtime.
 
 ## Assumptions and tests
 
-- Scope is current Relight modes/profile; test both modes and unrelated-feature
-  controls. Do not infer FP8 requirement from arbitrary model filenames.
-- Validate selected-device schema from Comfy source and observed stats. Define
-  conservative handling for empty, invalid or multiple contradictory devices.
+- Pin policy to qwen2509-relight-flash-v1 from manifest WORKFLOW_VERSION and
+  CatalogFeature.version. Relight exposes flash only: test flash and unchanged
+  rejection of standard, plus unrelated-feature controls. No filename inference
+  or new model abstraction. Future changed MPS profile fails explicitly as
+  unvalidated until policy review; preserve CPU/CUDA behavior.
+- Official Comfy-Org/ComfyUI v0.43.0 server.py:776,785-800 puts primary
+  get_torch_device() first, then other visible devices. Use ONLY devices[0].type.
+  Empty/malformed/unknown primary fails; extras do not override a valid primary.
+  Test CPU-first/MPS-second, CUDA-first/MPS-second, MPS-first/CUDA-second. This
+  supersedes older singleton-only source assumptions.
 - Parse stable/version suffix/nightly/missing/malformed versions conservatively;
   distinct messages must not turn newer MPS Ready without profile validation.
+- Shared JSON parity table: tests/fixtures/relight_device.json, consumed by
+  Python and Vitest pure-check tests. Keep tiny checks in their separate runtimes,
+  without a policy framework. Preserve probe address/timeout/abort/discovery and
+  request count. Extract one stats probe; no extra request or metadata cache.
+- Show device:relight failures in main Onboarding BEFORE download consent, both
+  otherwise-ready and missing-model cases. Extend narrow failure filters so the
+  reason stays visible. Explicit downloads may remain possible after warning;
+  preserve checkbox/selection/space consent semantics.
 - Shared table-driven parity cases cover Python/browser messages and status;
   complete otherwise-ready fixtures prove each guard changes Ready, not merely
   adds a warning behind unrelated missing-model failures.
 - Exercise actual Python API/CLI and browser checkRequirements plus submit paths;
-  known unsupported MPS must produce zero upload/prompt submissions. Existing
+  known unsupported MPS must produce zero UPSTREAM upload/prompt submissions.
+  Local API admission can remain accepted then fail visibly in worker. Test
+  regeneration and preserve existing-job polling/cancellation under red readiness. Existing
   endpoint generation/cancellation and integrity gates remain intact.
 - Mutation: bypass compatibility and observe both real caller tests fail; valid
   CPU/CUDA and unrelated-tool operations remain green. No live inference needed.
 
 ## Sequence and rollback
 
-1. Four-lens plan review, revise until cleared, before source changes.
+1. Four-lens plan review, revise until cleared, before source changes. Rebase on
+   queue PR9 and rerun baseline fixture BEFORE step2.
 2. Implement small pure checks, metadata propagation, parity and caller tests in
    isolated worktree. Verify no metadata writes/endpoints changes.
 3. Run full Python/frontend/Ruff/build and isolated local UI; generate bundled
    web assets through canonical build. Independent source review and dogfood.
 4. Push PR; merge exact reviewed head via merge commit after CI (native Windows
-   included). Rebase on newly merged queue PR before final tests if needed.
+   included), under the user's existing explicit push/merge authority.
 5. Hosted landing publication remains separately Luke-approved. Rollback is a
-   normal source revert / git revert -m1 for merged PR; never alter user models.
+   normal source revert / git revert -m1 for merged PR; regenerate web assets.
+   Never alter user models.
 
 ## Success, dependencies, non-goals and trade-offs
 
 Otherwise-ready MPS Relight gets a visible non-Ready explanation on Python and
-browser paths and cannot submit. Newer Torch is described accurately without
+browser paths and makes zero upstream submissions; local admission remains unchanged. Newer Torch is described accurately without
 claiming a validated Mac graph. CPU/CUDA existing controls and other tools retain
 behavior; malformed metadata is visible. No user files or runtime settings change.
 Depends on existing Comfy metadata and test harnesses. A supported Mac model
@@ -90,3 +110,31 @@ profile, GGUF nodes, memory capacity measurement and real full-graph validation
 remain separate work. The temporary gate can reject an unvalidated installation
 that might succeed; this is explicit until evidence supports a specific Mac
 profile, avoiding unsafe inference attempts on the reported36GB system.
+
+## Verification receipt
+
+All four revised-plan lenses returned SOLID. Source/caller review returned CLEAR.
+Full source checks: Python220passed/16platform-skipped, frontend167passed,
+Ruff and canonical web build passed. Existing TestClient warning remains visible
+and separately tracked. Shared parity cases include complete malformed versions,
+nightlies/RC/local versions, unknown metadata/profile and primary-device ordering.
+Otherwise-ready production caller fixtures substitute tiny real verified model
+identities; this is not evidence of real model inference. Actual Python worker,
+CLI/API doctor and Python regeneration fail the current MPS profile before any
+upstream transport operation. Browser generation makes no additional upload or
+prompt calls; a separately requested earlier source upload remains independent.
+CPU/CUDA fixture controls generate, poll and cancel; unrelated-tool checks retain
+behavior. Existing browser Regenerate routing is separately tracked (ledger9305),
+not counted as device-guard coverage.
+
+Isolated mutation controls: removing Python guard fails6 real caller checks;
+removing browser guard fails the actual generation test with an upstream prompt;
+hiding the warning fails2 visible-onboarding cases. A legitimate additional
+secondary-device entry retains11 Python and22 browser caller tests green.
+Actual Chromium desktop/mobile UI with read-only fake Comfy responses displayed
+older/newer MPS guidance and warning before download consent; no mutation requests
+or page errors. Explicit CPU metadata with otherwise identical present-model
+fixtures exposes Open studio; this is only a metadata/readiness control.
+No PyTorch upgrade, model download, inference, runtime switch or phone operation
+was performed for the fix. A validated memory-bounded Mac profile remains future
+work; do not claim Apple Silicon image generation is fixed by this mitigation.

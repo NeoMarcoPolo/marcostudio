@@ -141,6 +141,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const presentModels = report?.model_requirements.filter(model => model.available) ?? [];
   const unverified = report?.checks.some(check => check.name.startsWith("integrity:") && check.status === "fail") ?? false;
   const failures = report?.checks.filter(check => check.status === "fail" && (check.name.startsWith("node:") || check.name === "h3_pdd")) ?? [];
+  const deviceFailures = report?.checks.filter(check => check.name === "device:relight" && check.status === "fail") ?? [];
   const connectedHere = !!report?.connected && report.address === endpoint() && !connectionHelp && !connecting;
   const ready = !!report?.ready && !checking && connectedHere;
   const step = connectedHere ? report.ready ? 2 : 1 : 0;
@@ -303,6 +304,11 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
           </>}
       </>}
       {view === "setup" && connectedHere && <p className="setup-connected"><Check size={14}/> ComfyUI connected</p>}
+      {view === "setup" && connectedHere && deviceFailures.length > 0 && <section className="setup-compatibility" role="alert" aria-label="Relight compatibility">
+        <strong>Relight needs a compatible runtime</strong>
+        {deviceFailures.map(check => <p key={check.name}>{check.message}</p>)}
+        {missing.length > 0 && <p>Downloading these models will not make this runtime compatible with Relight.</p>}
+      </section>}
       {view === "setup" && step === 1 && <>
         {(!pendingDownloads || reviewModels) && <p className="requirements-summary">{missing.length > 0 && <span>{missing.length} model{missing.length === 1 ? "" : "s"} missing</span>}{missing.length > 0 && <span> · {formatSize(missing.reduce((total, model) => total + model.size, 0))}</span>}{missing.length > 0 && failures.length > 0 && " · "}{failures.length > 0 && `${failures.length} node check${failures.length === 1 ? "" : "s"} need attention`}</p>}
         {pendingDownloads && reviewModels && <button className="setup-back" onClick={() => setReviewModels(false)}>← Back to download progress</button>}
@@ -381,7 +387,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
       {view === "setup" && step !== 1 && <div className="setup-secondary"><button onClick={() => setView("connection")}>Change address</button></div>}
       {view === "requirements" && <section className="requirement-details">
           {!manager && missing.length > 0 && <p><a href="https://docs.comfy.org/manager" target="_blank" rel="noopener noreferrer">Enable ComfyUI-Manager</a> for automatic downloads, or add the files below.</p>}
-          {failures.map(check => <p key={check.name}><strong>{check.name.replace("node:", "")}</strong><br/>{check.message}</p>)}
+          {[...failures, ...deviceFailures].map(check => <p key={check.name}><strong>{check.name.replace("node:", "")}</strong><br/>{check.message}</p>)}
           {report?.checks.filter(check => check.name.startsWith("download:")).map(check => <p key={check.name}>{check.message}</p>)}
           {failures.some(check => check.name.includes("MarcoStudio") || check.name === "h3_pdd") && <p><a href="./marcostudio-nodes.zip" download>Download MarcoStudio nodes</a><br/>Extract the marcostudio folder into ComfyUI’s custom_nodes folder. Restart ComfyUI when idle.</p>}
           <a href={tool.workflow_url} target="_blank" rel="noopener noreferrer">View workflow</a>{" · "}<a href={tool.source_url} target="_blank" rel="noopener noreferrer">Upstream source</a>

@@ -91,7 +91,7 @@ export async function submitJob(body: Submission): Promise<SavedJob> {
     try {
       const report = await checkRequirements(body.feature, settings.mode);
       if (report.address !== address) throw new Error("The connection changed. Try again on the selected ComfyUI.");
-      if (!report.ready) throw new Error("This tool still needs setup in ComfyUI.");
+      if (!report.ready) throw new Error(report.checks.find(check => check.name === "device:relight" && check.status === "fail")?.message ?? "This tool still needs setup in ComfyUI.");
       const source = body.source_id ? await getAsset(body.source_id, address) : null;
       if (feature.source_kind !== "none" && !source?.media_type.startsWith(`${feature.source_kind}/`)) throw new Error(`Add a source ${feature.source_kind}.`);
       if (feature.source_kind === "none" && source) throw new Error("This tool doesn't accept a source.");
@@ -110,7 +110,7 @@ export async function submitJob(body: Submission): Promise<SavedJob> {
       // choices immediately before sending the generation request.
       const finalReport = await checkRequirements(body.feature, settings.mode);
       if (finalReport.address !== address || !finalReport.ready || JSON.stringify(finalReport.models) !== JSON.stringify(report.models))
-        throw new Error("ComfyUI model verification changed. Check setup again.");
+        throw new Error(finalReport.checks.find(check => check.name === "device:relight" && check.status === "fail")?.message ?? "ComfyUI model verification changed. Check setup again.");
       job.status = "submitting"; job.sent = true; save(address, job);
       const response = await send<{prompt_id: string}>(address, "/prompt", {prompt: graph, prompt_id: job.id, client_id: clientId(),
         extra_data: {marcostudio: {request_id: job.id, feature: body.feature, version: feature.version}}});

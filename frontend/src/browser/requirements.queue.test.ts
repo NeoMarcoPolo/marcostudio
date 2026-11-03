@@ -9,7 +9,7 @@ vi.mock("./catalog", () => ({
 vi.mock("./connection", () => ({
   endpoint: () => "http://127.0.0.1:8188",
   currentConnectionGeneration: () => 0,
-  probe: async () => {},
+  runtimeInfo: async () => ({system: {comfyui_version: "0.43.0", pytorch_version: "2.13.0"}, devices: [{type: "cpu"}]}),
   request: async (_address: string, path: string) => path === "/object_info/Loader"
     ? {Loader: {input: {required: {name: [["model.safetensors"]]}}}} : {},
 }));

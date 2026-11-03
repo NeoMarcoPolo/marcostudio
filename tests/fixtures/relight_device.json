@@ -1,0 +1,535 @@
+[
+  {
+    "name": "other-feature-unchanged",
+    "feature": "remove-background",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": null,
+    "expected": null
+  },
+  {
+    "name": "missing-runtime",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": null,
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Couldn't verify ComfyUI's selected device for Relight. Check the connected runtime's device metadata before generating."
+    }
+  },
+  {
+    "name": "missing-devices",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {},
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Couldn't verify ComfyUI's selected device for Relight. Check the connected runtime's device metadata before generating."
+    }
+  },
+  {
+    "name": "empty-devices",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": []
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Couldn't verify ComfyUI's selected device for Relight. Check the connected runtime's device metadata before generating."
+    }
+  },
+  {
+    "name": "invalid-primary",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        "cpu"
+      ]
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Couldn't verify ComfyUI's selected device for Relight. Check the connected runtime's device metadata before generating."
+    }
+  },
+  {
+    "name": "missing-type",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {}
+      ]
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Couldn't verify ComfyUI's selected device for Relight. Check the connected runtime's device metadata before generating."
+    }
+  },
+  {
+    "name": "unknown-type",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "fpga"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.13.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Couldn't verify ComfyUI's selected device for Relight. Check the connected runtime's device metadata before generating."
+    }
+  },
+  {
+    "name": "invalid-first-cuda-second",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        null,
+        {
+          "type": "cuda"
+        }
+      ]
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Couldn't verify ComfyUI's selected device for Relight. Check the connected runtime's device metadata before generating."
+    }
+  },
+  {
+    "name": "cpu",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "cpu"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.13.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "pass",
+      "message": "Selected ComfyUI device: cpu."
+    }
+  },
+  {
+    "name": "cuda",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "cuda"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.13.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "pass",
+      "message": "Selected ComfyUI device: cuda."
+    }
+  },
+  {
+    "name": "cpu-primary-mps-secondary",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "cpu"
+        },
+        {
+          "type": "mps"
+        }
+      ]
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "pass",
+      "message": "Selected ComfyUI device: cpu."
+    }
+  },
+  {
+    "name": "cuda-primary-mps-secondary",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "cuda"
+        },
+        {
+          "type": "mps"
+        }
+      ]
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "pass",
+      "message": "Selected ComfyUI device: cuda."
+    }
+  },
+  {
+    "name": "mps-primary-cuda-secondary",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        },
+        {
+          "type": "cuda"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.13.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs have known MPS failures with older PyTorch (detected 2.13.0). A validated Mac profile is not available yet. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "older-2.13.0",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.13.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs have known MPS failures with older PyTorch (detected 2.13.0). A validated Mac profile is not available yet. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "older-2.14.1",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.14.1"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs have known MPS failures with older PyTorch (detected 2.14.1). A validated Mac profile is not available yet. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "older-2.13.0+custom",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.13.0+custom"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs have known MPS failures with older PyTorch (detected 2.13.0+custom). A validated Mac profile is not available yet. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "newer-2.15.0",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "PyTorch 2.15 added MPS FP8 support (detected 2.15.0), but this Relight profile and its memory use remain unvalidated on MPS. MarcoStudio cannot mark it Ready."
+    }
+  },
+  {
+    "name": "newer-2.15.0+local",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15.0+local"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "PyTorch 2.15 added MPS FP8 support (detected 2.15.0+local), but this Relight profile and its memory use remain unvalidated on MPS. MarcoStudio cannot mark it Ready."
+    }
+  },
+  {
+    "name": "newer-2.15.0.dev20261028",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15.0.dev20261028"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "PyTorch 2.15 added MPS FP8 support (detected 2.15.0.dev20261028), but this Relight profile and its memory use remain unvalidated on MPS. MarcoStudio cannot mark it Ready."
+    }
+  },
+  {
+    "name": "newer-2.15.0rc1",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15.0rc1"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "PyTorch 2.15 added MPS FP8 support (detected 2.15.0rc1), but this Relight profile and its memory use remain unvalidated on MPS. MarcoStudio cannot mark it Ready."
+    }
+  },
+  {
+    "name": "newer-3.0.0",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "3.0.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "PyTorch 2.15 added MPS FP8 support (detected 3.0.0), but this Relight profile and its memory use remain unvalidated on MPS. MarcoStudio cannot mark it Ready."
+    }
+  },
+  {
+    "name": "mps-version-missing",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": null
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs are not validated on MPS, and its PyTorch version could not be verified. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "mps-version-malformed",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "not a version"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs are not validated on MPS, and its PyTorch version could not be verified. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "mps-version-oversized",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs are not validated on MPS, and its PyTorch version could not be verified. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "mps-version-newline",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15.0\nsecret"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs are not validated on MPS, and its PyTorch version could not be verified. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "mps-future-profile",
+    "feature": "relight",
+    "profile": "future-profile",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15.0"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "This Relight workflow's MPS compatibility has not been validated. Review its runtime profile before generating."
+    }
+  },
+  {
+    "name": "invalid-whole-version-2.15evil",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15evil"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs are not validated on MPS, and its PyTorch version could not be verified. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "invalid-whole-version-2.15.0unexpected",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15.0unexpected"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs are not validated on MPS, and its PyTorch version could not be verified. Choose a compatible runtime before generating."
+    }
+  },
+  {
+    "name": "invalid-whole-version-2.15",
+    "feature": "relight",
+    "profile": "qwen2509-relight-flash-v1",
+    "runtime": {
+      "devices": [
+        {
+          "type": "mps"
+        }
+      ],
+      "system": {
+        "pytorch_version": "2.15"
+      }
+    },
+    "expected": {
+      "name": "device:relight",
+      "status": "fail",
+      "message": "Relight's current FP8 models and LoRAs are not validated on MPS, and its PyTorch version could not be verified. Choose a compatible runtime before generating."
+    }
+  }
+]

@@ -38,6 +38,8 @@ vi.mock("./assets", async importOriginal => ({...await importOriginal<typeof imp
 }));
 const address = "http://127.0.0.1:8188";
 let missing = false, available = true, manager = false, losePrompt = false, loseDownload = false;
+let runtimeDevice = "cpu", torchVersion = "2.13.0";
+let runtimeDevices: unknown[] | undefined;
 let managerQueue: "idle" | "active" | "unknown" = "idle";
 let pending: unknown[][], history: Record<string, unknown>, taskHistory: Record<string, unknown>;
 let batchOperations: unknown[];
@@ -74,7 +76,7 @@ beforeEach(() => {
   vi.mocked(integrityStates).mockImplementation(async (_address, models) => new Map(models.map(model => [model.sha256, "matched"])));
   vi.mocked(integrityBusy).mockImplementation(actualIntegrity.integrityBusy);
   vi.mocked(failureScope).mockImplementation(actualIntegrity.failureScope);
-  managerQueue = "idle";
+  managerQueue = "idle"; runtimeDevice = "cpu"; torchVersion = "2.13.0"; runtimeDevices = undefined;
   missing = false; available = true; manager = false; losePrompt = false; loseDownload = false;
   pending = []; history = {}; taskHistory = {}; batchOperations = []; calls = [];
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {configurable: true, value: function(this: HTMLDialogElement) {this.setAttribute("open", "");}});
@@ -83,13 +85,16 @@ beforeEach(() => {
     const path = url.pathname, method = init?.method ?? "GET", body = init?.body instanceof FormData ? init.body : init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({path, method, body});
     if (url.port === "8000" || !available) throw new TypeError("Failed to fetch");
-    if (path === "/system_stats") return json({system: {comfyui_version: "0.18.0"}, devices: []});
+    if (path === "/system_stats") return json({system: {comfyui_version: "0.43.0", pytorch_version: torchVersion}, devices: runtimeDevices ?? [{type: runtimeDevice}]});
     if (path === "/marcostudio/capabilities") return json({error: "Not found"}, 404);
     if (path.startsWith("/object_info/")) {
       const name = decodeURIComponent(path.split("/").pop()!); const value = definitions()[name];
       return json(value ? {[name]: value} : {});
     }
-    if (path === "/queue") return json({queue_running: [], queue_pending: pending});
+    if (path === "/queue") {
+      if (method === "POST" && Array.isArray(body?.delete)) pending = pending.filter(item => !body.delete.includes(item[1]));
+      return json({queue_running: [], queue_pending: pending});
+    }
     if (path.startsWith("/history")) return json(history);
     if (path === "/view") return new Response(new Blob(["image"], {type: "image/png"}));
     if (path === "/upload/image") return json({name: (body.get("image") as File).name, subfolder: body.get("subfolder"), type: "input"});
@@ -359,4 +364,88 @@ describe("native generation and installation recovery", () => {
     batchOperations = [{operation_id: task.id, result: "success", end_time: new Date().toISOString()}];
     expect((await checkRequirements("relight", "flash")).ready).toBe(true);
   });
+});
+
+
+describe("Relight device readiness through real browser callers", () => {
+  beforeEach(() => {
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => ({width: 640, height: 480, close: vi.fn()})));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({drawImage: vi.fn()} as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(callback => callback(new Blob(["normalized"], {type: "image/png"})));
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fixture");
+  });
+  for (const version of ["2.13.0", "2.15.0"]) it(`blocks MPS ${version} before upstream upload or prompt`, async () => {
+    selectConnection(address); withChecksumHelper();
+    const control = await checkRequirements("relight", "flash");
+    expect(control.ready).toBe(true);
+    // Source upload is a separate prior user action; blocked generation must
+    // make no additional upload/prompt calls after this boundary.
+    const source = await uploadAsset(new File(["image"], "source.png", {type: "image/png"}));
+    const boundary = calls.length;
+    runtimeDevice = "mps"; torchVersion = version;
+    const report = await checkRequirements("relight", "flash");
+    expect(report.connected).toBe(true);
+    expect(report.model_requirements.every(model => model.available)).toBe(true);
+    expect(report.checks.filter(check => check.status === "fail").map(check => check.name)).toEqual(["device:relight"]);
+    const result = await post<Job>("/api/jobs", {request_id: crypto.randomUUID(), feature: "relight", source_id: source.id, inputs: {}, settings: getFeature("relight").defaults});
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("MPS");
+    expect(calls.slice(boundary).filter(call => call.path === "/upload/image" || call.path === "/prompt")).toEqual([]);
+    expect((await checkRequirements("create-image", getFeature("create-image").defaults.mode)).ready).toBe(true);
+  });
+  it("enforces the device guard inside generation before any additional upstream calls", async () => {
+    selectConnection(address); withChecksumHelper();
+    expect((await checkRequirements("relight", "flash")).ready).toBe(true);
+    const source = await uploadAsset(new File(["image"], "source.png", {type: "image/png"}));
+    const boundary = calls.length;
+    runtimeDevice = "mps";
+    const result = await post<Job>("/api/jobs", {request_id: crypto.randomUUID(), feature: "relight", source_id: source.id, inputs: {}, settings: getFeature("relight").defaults});
+    expect(calls.slice(boundary).filter(call => call.path === "/upload/image" || call.path === "/prompt")).toEqual([]);
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("MPS");
+  });
+  for (const absent of [false, true]) it(`shows compatibility before download consent with missing models=${absent}`, async () => {
+    selectConnection(address); withChecksumHelper(); runtimeDevice = "mps"; missing = absent; manager = true;
+    render(<App/>);
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("ComfyUI connected");
+    const warning = await within(dialog).findByRole("alert", {name: "Relight compatibility"});
+    expect(warning).toHaveTextContent("MPS");
+    expect(within(dialog).queryByRole("button", {name: "Open studio"})).not.toBeInTheDocument();
+    if (absent) {
+      expect(warning).toHaveTextContent("Downloading these models will not make this runtime compatible");
+      const confirmation = within(dialog).getByRole("checkbox", {name: /I confirm downloading/});
+      expect(warning.compareDocumentPosition(confirmation) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(confirmation).not.toBeChecked();
+    }
+    expect(calls.filter(call => call.method === "POST")).toEqual([]);
+  });
+  it.each(["cpu", "cuda"])("keeps %s queued-job polling and cancellation available when readiness becomes red", async (device) => {
+    selectConnection(address); withChecksumHelper(); runtimeDevice = device;
+    const source = await uploadAsset(new File(["image"], "source.png", {type: "image/png"}));
+    const body = {request_id: crypto.randomUUID(), feature: "relight", source_id: source.id, inputs: {}, settings: getFeature("relight").defaults};
+    expect((await post<Job>("/api/jobs", body)).status).toBe("queued");
+    runtimeDevice = "mps";
+    expect((await checkRequirements("relight", "flash")).ready).toBe(false);
+    expect((await api<Job>(`/api/jobs/${body.request_id}`)).status).toBe("queued");
+    expect((await post<Job>(`/api/jobs/${body.request_id}/cancel`, {})).status).toBe("cancelled");
+    expect(calls.filter(call => call.path === "/upload/image")).toHaveLength(1);
+    expect(calls.filter(call => call.path === "/prompt")).toHaveLength(1);
+  });
+  it("preserves unsupported standard-mode rejection", async () => {
+    selectConnection(address); withChecksumHelper();
+    const report = await checkRequirements("relight", "standard");
+    expect(report.ready).toBe(false);
+    expect(report.checks).toContainEqual({name: "mode", status: "fail", message: "Unsupported mode."});
+  });
+});
+
+
+it("keeps recognizable ComfyUI connected when selected-device metadata is unavailable", async () => {
+  selectConnection(address); withChecksumHelper(); runtimeDevices = [];
+  const report = await checkRequirements("relight", "flash");
+  expect(report.connected).toBe(true);
+  expect(report.ready).toBe(false);
+  expect(report.checks.filter(check => check.status === "fail").map(check => check.name)).toEqual(["device:relight"]);
+  expect(report.checks.find(check => check.name === "device:relight")?.message).toContain("selected device");
 });
