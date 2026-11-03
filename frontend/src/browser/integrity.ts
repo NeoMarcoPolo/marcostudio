@@ -4,12 +4,13 @@ import { canPairStorage } from "./modelSpace";
 
 type Pair = {address: string; token: string};
 type CheckState = "matched" | "unverified" | "blocked" | "active";
-type Job = {id: string; active: boolean};
+type Job = {id: string; active: boolean; cancelled?: boolean; context: ReturnType<typeof captureContext>; signal?: AbortSignal};
 const BAD_PREFIX = "marcostudio.integrity.failure.v2:";
 let persistenceUnsafe = false;
 let paired: Pair | undefined;
 let allowed: {address: string; ids: Set<string>; instance?: string; connection: number} | undefined;
 let consentGeneration = 0;
+let contextGeneration = 0;
 let observedAddress: string | undefined;
 let observedInstance: {address: string; instance?: string} | undefined;
 const jobs = new Map<string, Job>();
@@ -60,7 +61,8 @@ export function unpairIntegrity() {
   // Retain only outstanding jobs to avoid silently bypassing active work.
   for (const [key, job] of jobs) if (!job.active) jobs.delete(key);
 }
-export function clearUnverified() { allowed = undefined; observedInstance = undefined; consentGeneration++; }
+function invalidateUnverifiedConsent() { allowed = undefined; consentGeneration++; }
+export function clearUnverified() { invalidateUnverifiedConsent(); observedInstance = undefined; contextGeneration++; }
 export function allowsUnverified(address: string, id: string, instance?: string | null): boolean {
   return allowed?.address === address && allowed.connection === currentConnectionGeneration() && allowed.ids.has(id) && !isBad(address, id)
     && (instance === undefined || allowed.instance === (instance ?? undefined));
@@ -96,11 +98,11 @@ async function status(address: string, token: string, job: string, signal?: Abor
 }
 
 function captureContext(address: string) {
-  return {address, pair: paired, connection: currentConnectionGeneration(), consent: consentGeneration};
+  return {address, pair: paired, connection: currentConnectionGeneration(), generation: contextGeneration};
 }
 function contextCurrent(context: ReturnType<typeof captureContext>): boolean {
   return endpoint() === context.address && currentConnectionGeneration() === context.connection
-    && consentGeneration === context.consent && paired === context.pair;
+    && contextGeneration === context.generation && paired === context.pair;
 }
 
 async function remoteFailureSet(address: string, models: Model[], signal?: AbortSignal): Promise<Set<string> | null> {
@@ -130,7 +132,7 @@ export async function integrityStates(address: string, models: Model[], signal?:
       try {
         const result = await status(address, pair.token, job.id, signal);
         if (!contextCurrent(context)) { states.set(model.sha256, "unverified"); return; }
-        if (result.state === "checksum_matched") { job.active = false; clearBad(address, model.sha256); state = isBad(address, model.sha256) ? "blocked" : "matched"; }
+        if (result.state === "checksum_matched" && !job.cancelled && !job.signal?.aborted && contextCurrent(job.context)) { job.active = false; clearBad(address, model.sha256); state = isBad(address, model.sha256) ? "blocked" : "matched"; }
         else if (badStates.has(result.state)) { job.active = false; rememberBad(address, model.sha256, result.state); state = "blocked"; }
         else if (result.state === "queued" || result.state === "running") { job.active = true; state = "active"; }
         else { job.active = false; state = isBad(address, model.sha256) ? "blocked" : "unverified"; }
@@ -164,10 +166,14 @@ export async function integrityBusy(address: string, signal?: AbortSignal): Prom
     if (!contextCurrent(context)) return {state: "unknown"};
     if (value?.version !== 1) { clearUnverified(); return {state: "unknown"}; }
     const instance = typeof value.integrity_instance === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value.integrity_instance) ? value.integrity_instance : undefined;
+    const sameInstance = observedInstance?.address === address && observedInstance.instance === instance;
     noteInstance(address, instance);
     if (value.integrity_verification !== 1) return {state: "idle", instance, helper: false};
     if (typeof value.integrity_busy !== "boolean" || value.integrity_failure_lookup !== 1 || !instance) { clearUnverified(); return {state: "unknown"}; }
-    if (value.integrity_busy) clearUnverified();
+    if (value.integrity_busy) {
+      if (sameInstance) invalidateUnverifiedConsent();
+      else clearUnverified();
+    }
     return {state: value.integrity_busy ? "active" : "idle", instance, helper: true};
   } catch (error) { if (contextCurrent(context)) clearUnverified(); if (signal?.aborted) throw error; return {state: "unknown"}; }
 }
@@ -195,6 +201,9 @@ export async function verifyModelSnapshots(address: string, models: Model[], pro
   const pair = currentIntegrityPair(address);
   if (!pair || !canPairStorage(address)) throw new Error("Pair the verification helper first.");
   const context = captureContext(address);
+  const capability = await integrityBusy(address, signal);
+  if (signal?.aborted || !contextCurrent(context)) throw new Error("Verification cancelled.");
+  if (capability.state !== "idle" || capability.helper !== true) throw new Error("Wait for the verification helper to be available and idle.");
   const token = pair.token, digest = await digestCatalog();
   if (!contextCurrent(context)) throw new Error("Verification cancelled.");
   const alreadyVerified = await verifiedSnapshots(address, models, signal);
@@ -207,31 +216,35 @@ export async function verifyModelSnapshots(address: string, models: Model[], pro
       body: JSON.stringify({id: model.sha256, catalog: digest}), signal,
     });
     if (response?.state !== "accepted" || !response.job || !/^[A-Za-z0-9_-]{24}$/.test(response.job)) throw new Error(`Couldn't verify ${model.filename}.`);
-    if (!contextCurrent(context)) {
+    if (signal?.aborted || !contextCurrent(context)) {
       void request(address, `/marcostudio/integrity/${response.job}/cancel`, {method: "POST", headers: {Authorization: `Bearer ${token}`}}).catch(() => { console.warn("Could not cancel model verification."); });
       throw new Error("Verification cancelled.");
     }
     const job = response.job, key = keyFor(address, model.sha256);
-    jobs.set(key, {id: job, active: true});
+    const tracked: Job = {id: job, active: true, context, signal};
+    jobs.set(key, tracked);
     try {
       while (true) {
         if (signal?.aborted || !contextCurrent(context)) throw new Error("Verification cancelled.");
         const current = await status(address, token, job, signal);
-        if (!contextCurrent(context)) throw new Error("Verification cancelled.");
+        if (signal?.aborted || !contextCurrent(context)) throw new Error("Verification cancelled.");
         if (current.state === "checksum_matched") {
-          jobs.get(key)!.active = false;
+          tracked.active = false;
+          tracked.signal = undefined;
           clearBad(address, model.sha256);
           progress(`Checksum matched for ${model.filename} during the check at ${new Date(current.checkedAt!).toLocaleString()}. Files can change during or afterward.`);
           break;
         }
         if (current.state !== "queued" && current.state !== "running") {
-          jobs.get(key)!.active = false;
+          tracked.active = false;
           if (badStates.has(current.state)) rememberBad(address, model.sha256, current.state);
           throw new Error(`Verification of ${model.filename} did not complete (${current.state}).`);
         }
         await new Promise<void>(resolve => setTimeout(resolve, 1000));
       }
     } catch (error) {
+      // Retain active work for readiness checks, but never publish its late result.
+      tracked.cancelled = true;
       void request(address, `/marcostudio/integrity/${job}/cancel`, {method: "POST", headers: {Authorization: `Bearer ${token}`}}).catch(() => { console.warn("Could not cancel model verification."); });
       throw error;
     }
