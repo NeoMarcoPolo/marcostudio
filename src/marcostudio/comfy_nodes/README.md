@@ -27,6 +27,15 @@ ComfyUI endpoints.
 
 ## Model checksum checks
 
+Checksum verification requires **`comfyui-manager==4.2.2`** and its audited,
+unmodified `comfyui_manager.glob.manager_server.TaskQueue` implementation.
+The [queue observer](integrity_manager.py) checks the installed package version,
+class identity and module, and the SHA-256 of the class source. Missing Manager,
+a different version, or modified queue code cannot provide the required queue
+witness: checksum checks stay unavailable rather than reporting a match.
+This compatibility restriction applies to checksum verification; the general
+automatic-download interface uses the Manager 4 API.
+
 The helper can hash model files only after an explicit request from a paired
 client. A match says the checksum matched during the recorded check; it does
 not guarantee that the file stayed unchanged during or after the check. The
