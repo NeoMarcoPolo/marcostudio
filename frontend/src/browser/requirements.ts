@@ -1,6 +1,7 @@
 import type { Doctor, FeatureId } from "../api";
 import { getFeature, resolveTemplate, type Graph, type Model } from "./catalog";
-import { endpoint, probe, request } from "./connection";
+import { endpoint, runtimeInfo, request } from "./connection";
+import { deviceCompatibility } from "./compatibility";
 import { installTasks, reconcileInstalls, saveInstallTasks } from "./manager";
 import { allowsUnverified, clearUnverified, failureScope, integrityBusy, integrityStates } from "./integrity";
 
@@ -83,12 +84,15 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
   const selected = feature.models[mode];
   const result: Requirements = {ready: false, connected: false, address, checks: [], model_requirements: [], missing_nodes: [], models: {}};
   if (!selected) { result.checks.push({name: "mode", status: "fail", message: "Unsupported mode."}); return result; }
-  try { await probe(address, signal); result.connected = true; }
+  let runtime: unknown;
+  try { runtime = await runtimeInfo(address, signal); result.connected = true; }
   catch (error) {
     if (signal?.aborted) throw error;
     result.checks.push({name: "runtime", status: "fail", message: "Couldn't connect to ComfyUI."});
     return result;
   }
+  const compatibility = deviceCompatibility(id, feature.version, runtime);
+  if (compatibility) result.checks.push(compatibility);
   const variants = feature.variants.filter(v => v.mode === mode);
   const classes = [...new Set(variants.flatMap(v => Object.values(v.graph).map(node => node.class_type)))];
   const definitions: Record<string, Definition> = {};

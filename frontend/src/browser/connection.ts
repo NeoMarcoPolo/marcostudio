@@ -44,10 +44,15 @@ export function send<T>(address: string, path: string, body: unknown) {
   return request<T>(address, path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
 }
 
-export async function probe(address: string, signal?: AbortSignal, timeout = 4000) {
-  const data = await request<{system?: {comfyui_version?: string}; devices?: unknown[]}>(address, "/system_stats", {signal}, timeout);
+export async function runtimeInfo(address: string, signal?: AbortSignal, timeout = 4000) {
+  const data = await request<{system?: {comfyui_version?: string; pytorch_version?: unknown}; devices?: unknown[]}>(address, "/system_stats", {signal}, timeout);
   if (!data?.system || typeof data.system.comfyui_version !== "string" || !Array.isArray(data.devices))
     throw new Error("This address didn't respond as ComfyUI.");
+  return data;
+}
+
+export async function probe(address: string, signal?: AbortSignal, timeout = 4000) {
+  await runtimeInfo(address, signal, timeout);
   return address;
 }
 

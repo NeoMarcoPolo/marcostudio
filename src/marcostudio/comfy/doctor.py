@@ -11,6 +11,7 @@ import yaml
 
 from ..config import Settings
 from ..features import FEATURES, get_feature
+from .compatibility import device_compatibility
 from .model_paths import inspect_model, model_roots, resolve_model, select_loader
 
 
@@ -121,9 +122,13 @@ async def diagnose(
         result = await client.get(f"{config.comfy_url}/system_stats")
         result.raise_for_status()
         runtime = result.json()
-        record("runtime", "pass", "ComfyUI is reachable")
     except (httpx.HTTPError, ValueError) as exc:
         record("runtime", "fail", f"ComfyUI unreachable or response invalid: {type(exc).__name__}")
+    else:
+        record("runtime", "pass", "ComfyUI is reachable")
+        compatibility = device_compatibility(feature, tool.manifest.WORKFLOW_VERSION, runtime)
+        if compatibility:
+            checks.append(compatibility)
 
     if feature == "restyle-video" and mode == "flash":
         try:
