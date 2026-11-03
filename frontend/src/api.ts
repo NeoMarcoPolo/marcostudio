@@ -63,6 +63,10 @@ interface JobBase {
   progress: number | null;
   elapsed_seconds: number | null;
   queue_seconds: number | null;
+  waiting?: {
+    message: string;
+    blockers: {id: string; status: string; resolve_command?: string}[];
+  };
 }
 export type Job = JobBase &
   (

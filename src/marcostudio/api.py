@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .comfy.doctor import diagnose
 from .comfy.transport import ComfyTransport
 from .config import Settings, local_url, save_settings
-from .core.jobs import JobService
+from .core.jobs import JobService, jobs_with_waiting
 from .core.lock import RuntimeLock
 from .core.store import TERMINAL, Store
 from .core.video import MAX_VIDEO_BYTES
@@ -203,7 +203,14 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
 
     @app.get("/api/jobs")
     async def jobs():
-        return app.state.store.jobs()
+        return jobs_with_waiting(app.state.store.jobs())
+
+    def job_view(job_id):
+        snapshot = jobs_with_waiting(app.state.store.jobs())
+        for job in snapshot:
+            if job["id"] == job_id:
+                return job
+        raise KeyError("Job not found")
 
     async def enqueue(source_id, settings, request_id, feature_id="relight", inputs=None):
         inputs = inputs or {}
@@ -223,9 +230,10 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         try:
-            return app.state.store.create_job(
+            created = app.state.store.create_job(
                 source_id, settings.model_dump(), request_id, feature=feature_id, inputs=inputs
             )
+            return job_view(created["id"])
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
@@ -238,7 +246,7 @@ def create_app(config: Settings, *, config_file: Path | None = None, run_worker=
 
     @app.get("/api/jobs/{job_id}")
     async def job(job_id: str):
-        return app.state.store.job(job_id)
+        return job_view(job_id)
 
     @app.post("/api/jobs/{job_id}/cancel")
     async def cancel(job_id: str):

@@ -9,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import App from "./App";
-import type { StudioSettings } from "./api";
+import type { Job, StudioSettings } from "./api";
 
 const defaults = {
   direction: "front",
@@ -858,5 +858,52 @@ describe("Relight studio", () => {
     );
     expect(submissions).toHaveLength(2);
     expect(submissions[1].body).toEqual(submissions[0].body);
+  });
+});
+
+
+describe("Python queue waiting diagnostics", () => {
+  it("shows compact blockers, clears on polling, and reviews the actual blocker", async () => {
+    const uncertain = {...job, id: "uncertain", status: "needs_attention", outputs: []};
+    const running = {...job, id: "healthy", status: "running", outputs: []};
+    let pending: typeof job & {waiting?: Job["waiting"]} = {...job, id: "pending", status: "preparing", outputs: [],
+      waiting: {message: "Waiting for active jobs. Uncertain jobs must be reviewed before new work can start.", blockers: [
+        {id: "uncertain", status: "needs_attention", resolve_command: "marcostudio jobs --server STUDIO_URL resolve uncertain --confirm-not-running"},
+        {id: "healthy", status: "running"},
+      ]}};
+    // The uncertain blocker was created in another client after history loaded.
+    history = [pending, running];
+    const baseFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const record = [pending, uncertain, running].find(item => String(input) === `/api/jobs/${item.id}`);
+      if (record) return new Response(JSON.stringify(record), {status: 200, headers: {"Content-Type": "application/json"}});
+      return baseFetch(input, init);
+    });
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", {name: /Open generation.*preparing/}));
+    const summary = await screen.findByText("Waiting for 2 active generations");
+    const details = summary.closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    expect(details.closest('[role="status"]')).toBeNull();
+    await userEvent.click(summary);
+    expect(within(details).getByText("marcostudio jobs --server STUDIO_URL resolve uncertain --confirm-not-running")).toBeInTheDocument();
+    expect(within(details).queryByText(/resolve healthy/)).not.toBeInTheDocument();
+    pending = {...pending, waiting: undefined};
+    await waitFor(() => expect(screen.queryByText("Waiting for 2 active generations")).not.toBeInTheDocument(), {timeout: 4000});
+    pending = {...pending, waiting: {message: "Waiting for active jobs", blockers: [{id: "uncertain", status: "needs_attention"}]}};
+    const updatedSummary = await screen.findByText("Waiting for 1 active generation", {}, {timeout: 4000});
+    await userEvent.click(updatedSummary);
+    await userEvent.click(screen.getByRole("button", {name: "Review generation uncertain"}));
+    await screen.findByRole("button", {name: "Resolve uncertain job"});
+    expect(screen.getByRole("button", {name: /Open generation.*needs attention/})).toHaveAttribute("aria-pressed", "true");
+    expect(calls.filter(item => item.method === "POST")).toEqual([]);
+  });
+  it("accepts payloads without waiting metadata", async () => {
+    history = [{...job, status: "preparing", outputs: []}];
+    polledJob = {...job, status: "preparing", outputs: []};
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", {name: /Open generation.*preparing/}));
+    await screen.findByText("Generation preparing");
+    expect(screen.queryByText(/Waiting for .*active generation/)).not.toBeInTheDocument();
   });
 });

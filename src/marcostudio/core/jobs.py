@@ -14,6 +14,32 @@ from .assets import Assets
 from .store import TERMINAL, Store, now
 
 
+def jobs_with_waiting(jobs: list[dict]) -> list[dict]:
+    """Describe one snapshot without changing persisted jobs or admission."""
+    blockers = []
+    for job in jobs:
+        if job["status"] in TERMINAL | {"preparing"}:
+            continue
+        blocker = {"id": job["id"], "status": job["status"]}
+        if job["status"] == "needs_attention":
+            blocker["resolve_command"] = (
+                f"marcostudio jobs --server STUDIO_URL resolve {job['id']} --confirm-not-running"
+            )
+        blockers.append(blocker)
+    return [
+        job
+        | {
+            "waiting": {
+                "message": "Waiting for active jobs.",
+                "blockers": blockers,
+            }
+        }
+        if job["status"] == "preparing" and blockers
+        else dict(job)
+        for job in jobs
+    ]
+
+
 class JobService:
     def __init__(self, config: Settings, store: Store, transport):
         self.config, self.store, self.transport = config, store, transport
