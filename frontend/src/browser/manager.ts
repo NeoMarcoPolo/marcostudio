@@ -82,7 +82,10 @@ export async function reconcileInstalls(address = endpoint()) {
             task.error = task.state === "failed" ? failureGuidance(operation.error_message) : undefined;
           }
         }
-      } catch { /* Missing batch history leaves the request uncertain, not retryable. */ }
+      } catch {
+        // Never log Manager response details: they may contain private paths or URLs.
+        console.warn("Couldn't read ComfyUI Manager batch history; unresolved downloads remain uncertain and will not be resubmitted.");
+      }
     }
   }
   saveInstallTasks(address, tasks);

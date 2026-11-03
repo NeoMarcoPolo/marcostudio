@@ -65,6 +65,25 @@ describe("download submission queue recheck", () => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("Manager download failure guidance", () => {
+  it("warns without private details and preserves uncertain downloads when batch history is unavailable", async () => {
+    const task: InstallTask = {id: "uncertain-task", model, state: "unknown", submittedAt: 123};
+    saveInstallTasks(address, [task]);
+    const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/history_list")) throw new Error("private /home/owner/models and https://private.example/token");
+      if (url.pathname.endsWith("/history")) return response({history: {}});
+      if (url.pathname.endsWith("/status")) return response({total_count: 0, pending_count: 0, in_progress_count: 0, is_processing: false});
+      throw new Error(`Unexpected request ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    await expect(reconcileInstalls(address)).resolves.toEqual([task]);
+    expect(console.warn).toHaveBeenCalledWith("Couldn't read ComfyUI Manager batch history; unresolved downloads remain uncertain and will not be resubmitted.");
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("private");
+    await startDownloads([model], address);
+    expect(installTasks(address)).toEqual([task]);
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+  });
+
   it("treats a generic completed Manager failure as a possible disk or network issue", async () => {
     const task: InstallTask = {id: "failure-task", model, state: "queued"};
     saveInstallTasks(address, [task]);
