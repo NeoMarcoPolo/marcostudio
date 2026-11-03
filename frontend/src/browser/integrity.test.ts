@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { catalog } from "./catalog";
 import { selectConnection } from "./connection";
+import { checkRequirements } from "./requirements";
 import { allowUnverified, allowsUnverified, clearUnverified, currentIntegrityPair, failureScope, integrityBusy, pairIntegrity, unpairIntegrity, verifiedSnapshots, verifyModelSnapshots } from "./integrity";
 
 const address = "http://127.0.0.1:8196";
 const model = catalog[0].models.flash[0];
 const job = "a".repeat(24);
+const idleCapability = {version: 1, integrity_verification: 1, integrity_busy: false, integrity_failure_lookup: 1, integrity_instance: "test_instance"};
 beforeEach(() => {
   const values = new Map<string, string>([["marcostudio.connection.v1", address]]);
   vi.stubGlobal("localStorage", {getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key)});
@@ -18,6 +20,7 @@ it("requires a paired verification and rechecks each snapshot before allowing it
   const requests: {url: string; init?: RequestInit}[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     requests.push({url: String(url), init});
+    if (String(url).endsWith("/marcostudio/capabilities")) return new Response(JSON.stringify(idleCapability), {status: 200});
     return new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: []} : String(url).endsWith("/integrity") ? {state: "accepted", job} : {state, checked_at: "2026-10-30T18:00:00+00:00"}), {status: 200});
   }));
   expect((await verifiedSnapshots(address, [model])).size).toBe(0);
@@ -25,8 +28,8 @@ it("requires a paired verification and rechecks each snapshot before allowing it
   await verifyModelSnapshots(address, [model], () => {});
   expect((await verifiedSnapshots(address, [model])).has(model.sha256)).toBe(true);
   expect(requests.every(call => !call.url.includes("owner-secret"))).toBe(true);
-  expect(requests.every(call => (call.init?.headers as Record<string, string>).Authorization === "Bearer owner-secret")).toBe(true);
-  expect(String(requests[0].init?.body)).not.toContain("owner-secret");
+  expect(requests.filter(call => !call.url.endsWith("/marcostudio/capabilities")).every(call => (call.init?.headers as Record<string, string>).Authorization === "Bearer owner-secret")).toBe(true);
+  expect(requests.every(call => !String(call.init?.body).includes("owner-secret"))).toBe(true);
   state = "changed";
   expect((await verifiedSnapshots(address, [model])).size).toBe(0);
   expect((await verifiedSnapshots("http://127.0.0.1:8197", [model])).size).toBe(0);
@@ -69,7 +72,7 @@ it("rejects fallback when helper work is active or capability is unknown", async
 
 it("keeps a known checksum failure blocked after unpairing", async () => {
   const otherModel = catalog[0].models.flash[3];
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).endsWith("/integrity") ? {state: "accepted", job} : {state: "hash_mismatch"}), {status: 200})));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).endsWith("/marcostudio/capabilities") ? idleCapability : String(url).endsWith("/integrity") ? {state: "accepted", job} : {state: "hash_mismatch"}), {status: 200})));
   pairIntegrity(address, "owner-secret");
   await expect(verifyModelSnapshots(address, [otherModel], () => {})).rejects.toThrow(/hash_mismatch/);
   unpairIntegrity();
@@ -139,7 +142,7 @@ it("allows a paired user to continue for models disjoint from another failure", 
 it("uses independent persisted keys for distinct model failures", async () => {
   const first = catalog[0].models.flash[1], second = catalog[0].models.flash[2];
   const writes = vi.spyOn(localStorage, "setItem");
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: []} : String(url).endsWith("/integrity") ? {state: "accepted", job} : {state: "hash_mismatch"}), {status: 200})));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes("/integrity-failures?") ? {failed: []} : String(url).endsWith("/marcostudio/capabilities") ? idleCapability : String(url).endsWith("/integrity") ? {state: "accepted", job} : {state: "hash_mismatch"}), {status: 200})));
   pairIntegrity(address, "owner-secret");
   await Promise.allSettled([verifyModelSnapshots(address, [first], () => {}), verifyModelSnapshots(address, [second], () => {})]);
   const keys = writes.mock.calls.map(([key]) => key).filter(key => key.startsWith("marcostudio.integrity.failure.v2:"));
@@ -151,7 +154,7 @@ it("lets an authenticated helper failure override an earlier matching job", asyn
   let failed = false;
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     const path = String(url);
-    const body = path.includes("/integrity-failures?") ? {failed: failed ? [other.sha256] : []}
+    const body = path.endsWith("/marcostudio/capabilities") ? idleCapability : path.includes("/integrity-failures?") ? {failed: failed ? [other.sha256] : []}
       : path.endsWith("/integrity") ? {state: "accepted", job}
       : {state: "checksum_matched", checked_at: "2026-10-30T18:00:00+00:00"};
     return new Response(JSON.stringify(body), {status: 200});
@@ -209,4 +212,174 @@ it("does not let a late A capability failure clear B's consent", async () => {
   release(new Response(null, {status: 503}));
   expect((await stale).state).toBe("unknown");
   expect(allowsUnverified(b, other.sha256)).toBe(true);
+});
+
+// Resolve a real-shaped status response only after the test exercises a race.
+// Each identity is unique so prior successful jobs cannot qualify the control.
+async function deferredVerification(identity: string, signal?: AbortSignal) {
+  const selected = {...model, sha256: identity.repeat(64)};
+  const jobId = identity.repeat(24);
+  let release!: (response: Response) => void;
+  let started!: () => void;
+  let first = true;
+  const waiting = new Promise<void>(resolve => {started = resolve;});
+  let capability: unknown = {version: 1, integrity_verification: 1, integrity_busy: false,
+    integrity_failure_lookup: 1, integrity_instance: "race_instance"};
+  let manager: unknown = {pending_count: 0, in_progress_count: 0, is_processing: false};
+  const cancelled: string[] = [];
+  const matched = () => new Response(JSON.stringify({state: "checksum_matched", checked_at: "2026-11-03T12:00:00Z"}), {status: 200});
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/marcostudio/capabilities") return new Response(JSON.stringify(capability), {status: 200});
+    if (path === "/system_stats") return new Response(JSON.stringify({system: {comfyui_version: "0.43.0"}, devices: []}), {status: 200});
+    if (path === "/v2/manager/queue/status") return new Response(JSON.stringify(manager), {status: 200});
+    if (path.includes("/integrity-failures")) return new Response(JSON.stringify({failed: []}), {status: 200});
+    if (path.endsWith("/cancel")) { cancelled.push(path); return new Response(JSON.stringify({state: "cancelled"}), {status: 200}); }
+    if (path.endsWith("/integrity")) return new Response(JSON.stringify({state: "accepted", job: jobId}), {status: 200});
+    if (path.endsWith(`/integrity/${jobId}`)) {
+      if (first) {first = false; started(); return new Promise<Response>(resolve => {release = resolve;});}
+      return matched();
+    }
+    return new Response(JSON.stringify({}), {status: 200});
+  }));
+  pairIntegrity(address, "test-owner-code");
+  const pending = verifyModelSnapshots(address, [selected], () => {}, signal);
+  const outcome = pending.then(() => "fulfilled", error => String(error));
+  await waiting;
+  return {selected, jobId, cancelled, outcome,
+    capability: (value: unknown) => {capability = value;},
+    manager: (value: unknown) => {manager = value;},
+    finish: () => release(matched())};
+}
+
+it("finishes an authenticated verification across a same-instance busy poll", async () => {
+  const race = await deferredVerification("1");
+  race.capability({version: 1, integrity_verification: 1, integrity_busy: true,
+    integrity_failure_lookup: 1, integrity_instance: "race_instance"});
+  expect((await integrityBusy(address)).state).toBe("active");
+  race.finish();
+  expect(await race.outcome).toBe("fulfilled");
+  expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set([race.selected.sha256]));
+  expect(race.cancelled).toEqual([]);
+  expect(allowsUnverified(address, race.selected.sha256)).toBe(false);
+});
+
+it("does not publish a deferred checksum result after an explicit abort", async () => {
+  const controller = new AbortController();
+  const race = await deferredVerification("2", controller.signal);
+  controller.abort();
+  try { expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set()); }
+  finally { race.finish(); }
+  expect(await race.outcome).not.toBe("fulfilled");
+  expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set());
+  expect(allowsUnverified(address, race.selected.sha256)).toBe(false);
+  expect(race.cancelled).toEqual([`/marcostudio/integrity/${race.jobId}/cancel`]);
+});
+
+it.each([
+  ["unpair and re-pair", "3", async () => {unpairIntegrity(); pairIntegrity(address, "new-test-code");}],
+  ["endpoint A-B-A", "4", async () => {selectConnection("http://127.0.0.1:8197"); selectConnection(address);}],
+  ["helper instance replacement", "5", async (race: Awaited<ReturnType<typeof deferredVerification>>) => {
+    race.capability({version: 1, integrity_verification: 1, integrity_busy: true, integrity_failure_lookup: 1, integrity_instance: "replacement"});
+    await integrityBusy(address);
+  }],
+  ["malformed helper capability", "6", async (race: Awaited<ReturnType<typeof deferredVerification>>) => {
+    race.capability({version: 1, integrity_verification: 1, integrity_busy: true}); await integrityBusy(address);
+  }],
+] as const)("does not publish a deferred result after %s", async (_name, identity, invalidate) => {
+  const race = await deferredVerification(identity);
+  await invalidate(race);
+  try { expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set()); }
+  finally { race.finish(); }
+  expect(await race.outcome).not.toBe("fulfilled");
+  expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set());
+  expect(allowsUnverified(address, race.selected.sha256)).toBe(false);
+});
+
+it.each(["active", "unknown"] as const)("retains full invalidation for a %s Manager queue", async state => {
+  const race = await deferredVerification(state === "active" ? "7" : "8");
+  race.manager(state === "active" ? {pending_count: 1, in_progress_count: 0, is_processing: true} : {});
+  const report = await checkRequirements("relight", "flash");
+  expect(report.checks).toContainEqual(expect.objectContaining({name: "manager:queue", status: "fail"}));
+  try { expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set()); }
+  finally { race.finish(); }
+  expect(await race.outcome).not.toBe("fulfilled");
+  expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set());
+  expect(allowsUnverified(address, race.selected.sha256)).toBe(false);
+});
+
+it("does not restore deferred bypass consent after an intervening valid busy observation", async () => {
+  const selected = {...model, sha256: "9".repeat(64)};
+  let busy = false, release!: (response: Response) => void, lookupStarted!: () => void;
+  const started = new Promise<void>(resolve => {lookupStarted = resolve;});
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/marcostudio/capabilities") return new Response(JSON.stringify({version: 1, integrity_verification: 1,
+      integrity_busy: busy, integrity_failure_lookup: 1, integrity_instance: "consent_instance"}), {status: 200});
+    if (path === "/marcostudio/integrity-failures") {lookupStarted(); return new Promise<Response>(resolve => {release = resolve;});}
+    throw new Error(`Unexpected request: ${path}`);
+  }));
+  pairIntegrity(address, "test-owner-code");
+  const pending = allowUnverified(address, [selected]);
+  const outcome = pending.then(() => "fulfilled", error => String(error));
+  await started;
+  busy = true;
+  expect((await integrityBusy(address)).state).toBe("active");
+  release(new Response(JSON.stringify({failed: []}), {status: 200}));
+  expect(await outcome).not.toBe("fulfilled");
+  expect(allowsUnverified(address, selected.sha256)).toBe(false);
+});
+
+it.each([
+  ["busy", {...idleCapability, integrity_busy: true}],
+  ["unsupported", {...idleCapability, integrity_verification: 0}],
+  ["malformed", {version: 1, integrity_verification: 1}],
+] as const)("refuses verification admission when the helper is %s", async (_label, capability) => {
+  const selected = {...model, sha256: "b".repeat(64)};
+  const posts: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (init?.method === "POST") posts.push(path);
+    return new Response(JSON.stringify(path === "/marcostudio/capabilities" ? capability : {failed: []}), {status: 200});
+  }));
+  pairIntegrity(address, "test-owner-code");
+  await expect(verifyModelSnapshots(address, [selected], () => {})).rejects.toThrow();
+  expect(posts).toEqual([]);
+  expect(await verifiedSnapshots(address, [selected])).toEqual(new Set());
+  expect(allowsUnverified(address, selected.sha256)).toBe(false);
+});
+
+it.each(["pair replacement", "endpoint A-B-A"] as const)("keeps the preflight context across a deferred %s", async change => {
+  const selected = {...model, sha256: "c".repeat(64)};
+  let release!: (response: Response) => void, begin!: () => void;
+  const started = new Promise<void>(resolve => {begin = resolve;});
+  const posts: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (init?.method === "POST") posts.push(path);
+    if (path === "/marcostudio/capabilities") {begin(); return new Promise<Response>(resolve => {release = resolve;});}
+    return new Response(JSON.stringify({failed: []}), {status: 200});
+  }));
+  pairIntegrity(address, "first-test-code");
+  const pending = verifyModelSnapshots(address, [selected], () => {});
+  const outcome = pending.then(() => "fulfilled", error => String(error));
+  await started;
+  if (change === "pair replacement") pairIntegrity(address, "second-test-code");
+  else {selectConnection("http://127.0.0.1:8197"); selectConnection(address);}
+  release(new Response(JSON.stringify(idleCapability), {status: 200}));
+  expect(await outcome).not.toBe("fulfilled");
+  expect(posts).toEqual([]);
+  expect(await verifiedSnapshots(address, [selected])).toEqual(new Set());
+  expect(allowsUnverified(address, selected.sha256)).toBe(false);
+});
+
+it("retains an accepted checksum snapshot after successful modal cleanup aborts its controller", async () => {
+  const controller = new AbortController();
+  const race = await deferredVerification("d", controller.signal);
+  race.finish();
+  expect(await race.outcome).toBe("fulfilled");
+  controller.abort();
+  expect(await verifiedSnapshots(address, [race.selected])).toEqual(new Set([race.selected.sha256]));
+  expect(race.cancelled).toEqual([]);
+  expect(allowsUnverified(address, race.selected.sha256)).toBe(false);
 });
