@@ -1,0 +1,9 @@
+# Validate Relight on the 36 GB M4 Max
+
+Issue #2 reports an FP8 cast failure, 16 GB swap growth and a watchdog restart. PR #10 keeps the pinned profile non-Ready. Baseline is main at bc58967. Validate real weights before changing readiness.
+
+Use a separate loopback-only ComfyUI tree, model directory and output directory. Verify runtime versions and MPS in system_stats. Preserve the Relight graph and both LoRAs except for loader and filename substitutions. Candidate: QuantStack Q4_K_S diffusion, unsloth Q4_K_M encoder and matching projector. Publisher LFS metadata gives 12,204,309,024, 4,683,072,384 and 1,354,163,040 bytes respectively. Resolve immutable revisions, review the city96 loader and its dependencies, check disk space and verify all hashes before loading. Reuse the pinned VAE and LoRAs. Confirm loader and encoder options in object_info before submission.
+
+Start with one small public sample image. Establish a swap and pressure baseline, cap MPS allocations and monitor process and system memory throughout. Stop the owned process on system pressure warning, 2 GiB added swap or timeout. Avoid loading the original 31 GB profile on MPS. Repeat at a representative supported image size only after a healthy first run. Record exact runtime, model hashes, dimensions, elapsed time, memory and decoded images. Inspect changes in illumination and source preservation.
+
+After candidate success, plan CLI/server/browser selection, catalog, manifest, graph, integrity and consent wiring. Verify a real MarcoStudio run, preserve CPU/CUDA readiness and merge only after CI. Rollback is stopping the isolated process and reverting the product PR. Unknowns: whether the GGUF loader can apply both LoRAs within the cap, the encoder/projector pairing, and supported image sizes. Dependencies are the published assets, loader and physical Mac. Hosted deployment and platform-wide certification are outside scope.
