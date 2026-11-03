@@ -426,13 +426,15 @@ export default function App() {
         },
       });
   };
-  const openJob = async (item: Job) => {
+  const openJob = async (requested: Job | string) => {
     if (busy.current || sourceMutation.current || retry) return;
     sourceMutation.current = true;
     setLoadingSelection(true);
     setError("");
     const sequence = ++sourceSequence.current;
     try {
+      const item = typeof requested === "string"
+        ? await api<Job>(`/api/jobs/${encodeURIComponent(requested)}`) : requested;
       const [asset, references] = await Promise.all([
         item.source_id ? api<Asset>(`/api/assets/${encodeURIComponent(item.source_id)}/meta`) : undefined,
         Promise.all(Object.entries(item.inputs ?? {}).map(async ([key, id]) =>
@@ -461,6 +463,7 @@ export default function App() {
           if ("negative_prompt" in restored) restored.negative_prompt = "";
           setCreativeSettings(previous => ({...previous, [item.feature]: restored}));
         }
+        if (typeof requested === "string") upsert(item);
         setSelected(item.id);
         setResolveFor(undefined);
         setView("result");
@@ -722,6 +725,24 @@ export default function App() {
                   </span>
                 )}
               </div>
+            )}
+            {job?.status === "preparing" && job.waiting && job.waiting.blockers.length > 0 && (
+              <details className="waiting-jobs">
+                <summary>Waiting for {job.waiting.blockers.length} active {job.waiting.blockers.length === 1 ? "generation" : "generations"}</summary>
+                <p>{job.waiting.message}</p>
+                <ul>
+                  {job.waiting.blockers.map(blocker => {
+                    return <li key={blocker.id}>
+                      <code>{blocker.id}</code> — {label(blocker.status)}
+                      <button aria-label={`Review generation ${blocker.id}`} disabled={sourceBusy || !!retry} onClick={() => void openJob(blocker.id)}>Review generation</button>
+                      {blocker.resolve_command && <>
+                        <p>Confirm this generation is no longer running before resolving it. In the CLI, replace STUDIO_URL with the same server used to view these jobs:</p>
+                        <code>{blocker.resolve_command}</code>
+                      </>}
+                    </li>;
+                  })}
+                </ul>
+              </details>
             )}
             {job?.status === "needs_attention" && (
               <div className="resolution-panel">

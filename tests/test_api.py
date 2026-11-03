@@ -165,3 +165,63 @@ def test_resolution_requires_confirmation_and_retains_uncertainty_in_history(cli
     assert response.json()["status"] == "abandoned"
     assert "not verified" in response.json()["error"]
     assert len(client.get("/api/jobs").json()) == 1
+
+
+def test_waiting_diagnostics_cover_reads_submission_regeneration_and_clearing(client):
+    source = upload(client)
+    store = client.app.state.store
+    uncertain = store.create_job(source["id"], {}, "uncertain")
+    healthy = store.create_job(source["id"], {}, "healthy")
+    store.update_job(uncertain["id"], status="needs_attention")
+    store.update_job(healthy["id"], status="running")
+    payload = {"source_id": source["id"], "settings": {}, "request_id": "pending"}
+    response = client.post("/api/jobs", json=payload)
+    assert response.status_code == 201
+    pending = response.json()
+    before = store.jobs()
+    expected = [
+        {"id": healthy["id"], "status": "running"},
+        {
+            "id": uncertain["id"],
+            "status": "needs_attention",
+            "resolve_command": f"marcostudio jobs --server STUDIO_URL resolve {uncertain['id']} --confirm-not-running",
+        },
+    ]
+    assert pending["waiting"]["blockers"] == expected
+    assert client.get(f"/api/jobs/{pending['id']}").json() == pending
+    assert next(j for j in client.get("/api/jobs").json() if j["id"] == pending["id"]) == pending
+    assert client.post("/api/jobs", json=payload).json() == pending
+    assert store.jobs() == before
+    regenerated = client.post(
+        f"/api/jobs/{pending['id']}/regenerate", json={"request_id": "regenerated"}
+    )
+    assert regenerated.status_code == 201
+    assert regenerated.json()["waiting"]["blockers"] == expected
+    assert client.get("/api/jobs/missing").status_code == 404
+    store.update_job(uncertain["id"], status="abandoned")
+    remaining = client.get(f"/api/jobs/{pending['id']}").json()["waiting"]["blockers"]
+    assert remaining == [{"id": healthy["id"], "status": "running"}]
+    store.update_job(healthy["id"], status="succeeded")
+    assert "waiting" not in client.get(f"/api/jobs/{pending['id']}").json()
+    assert all("waiting" not in j for j in store.jobs())
+
+
+def test_detail_waiting_uses_one_snapshot_and_preserves_not_found(client, monkeypatch):
+    store = client.app.state.store
+    pending = store.create_job(None, {}, "snapshot")
+    snapshot = store.jobs()
+    reads = []
+
+    def one_snapshot():
+        reads.append(True)
+        return snapshot
+
+    def forbidden_second_read(*args):
+        raise AssertionError("Detail target must come from the blocker snapshot")
+
+    monkeypatch.setattr(store, "jobs", one_snapshot)
+    monkeypatch.setattr(store, "job", forbidden_second_read)
+    assert client.get(f"/api/jobs/{pending['id']}").json() == pending
+    assert reads == [True]
+    assert client.get("/api/jobs/missing").status_code == 404
+    assert reads == [True, True]
