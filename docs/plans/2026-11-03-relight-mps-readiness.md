@@ -124,7 +124,7 @@ CLI/API doctor and Python regeneration fail the current MPS profile before any
 upstream transport operation. Browser generation makes no additional upload or
 prompt calls; a separately requested earlier source upload remains independent.
 CPU/CUDA fixture controls generate, poll and cancel; unrelated-tool checks retain
-behavior. Existing browser Regenerate routing is separately tracked (ledger9305),
+behavior. Existing browser Regenerate routing is separately tracked (ledger9308),
 not counted as device-guard coverage.
 
 Isolated mutation controls: removing Python guard fails6 real caller checks;
