@@ -21,3 +21,7 @@ The isolated ComfyUI v0.43.0 server (426f5eea52a7ece1dd599fff4cb6cd1f352ddd24) r
 The 384-square diagnostic submitted as 9b1a1066-3508-41f3-8562-ba9c66c7f35c. ComfyUI loaded the VAE on MPS and matched the BF16 projector to the GGUF encoder, which loaded on CPU. The watchdog stopped the owned server during text encoding after 19.35 seconds of server lifetime, before denoising or any saved image. At the stop, macOS pressure level rose from 1 to 2, sampled RSS reached 7,612,464 KiB, free percentage fell to 43%, and swap remained at its initial 13,658.69 MiB. The MPS high and low ratios were 0.63 and 0.50. Pressure was still at level 2 after the server exited. Port 8197 was clear.
 
 This result establishes asset and loader discovery on the tested runtime. The Mac profile remains unvalidated. Retry only with stable normal pressure and the same safeguards, then require the full product run. Retain the existing fail-closed readiness check while validation is pending.
+
+## Deferred after further diagnostics
+
+The smaller Q2_K encoder and a diagnostic with a 384-square reference latent also reached the unchanged memory-pressure stop. The latest reduced-reference retry stopped at 12.14 seconds with pressure level 2, swap 14,240.25 MiB and RSS 2,658,544 KiB. No saved image was produced. The isolated server exited and its temporary node-source change was restored. The user deferred MarcoStudio work on November 5. This documentation records the investigation for resumption; issue #2 remains open for a working, validated profile.
