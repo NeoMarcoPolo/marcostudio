@@ -232,7 +232,7 @@ Image results support comparison, download and reuse as the next input. Videos p
 
 ## Contributing
 
-[Report a bug](https://github.com/NeoMarcoPolo/marcostudio/issues) with your OS, ComfyUI version and steps to reproduce it. For the Python application, include its Python version too. Remove personal paths and image data from diagnostics before sharing. Pull requests are welcome.
+[Report a bug in MarcoStudio QA](https://github.com/NeoMarcoPolo/mp-marcostudio-qa/issues) with your OS, ComfyUI version and steps to reproduce it. For the Python application, include its Python version too. Remove personal paths and image data from diagnostics before sharing. Pull requests belong in this source repository.
 
 For a new tool, start with the [feature registry](src/marcostudio/features), define its models and workflow, and add its controls in [the frontend](frontend/src). The browser catalog is generated from the Python workflows so both runtimes share the same definitions.
 
