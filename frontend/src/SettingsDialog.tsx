@@ -48,6 +48,13 @@ function CheckList({ checks }: { checks: Doctor["checks"] }) {
   );
 }
 
+// The browser's URL field rejects "127.0.0.1:8188", which is how ComfyUI
+// prints its address. Accept it and add the scheme the server requires.
+export const withScheme = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed && !trimmed.includes("://") ? `http://${trimmed}` : trimmed;
+};
+
 export function SettingsDialog({
   value,
   doctor,
@@ -77,7 +84,7 @@ export function SettingsDialog({
   const dialog = useRef<HTMLDivElement>(null);
   const changes: Partial<StudioSettings> = {};
   for (const key of ["comfy_url", "proxy_url", "comfy_dir"] as const) {
-    const next = form[key].trim();
+    const next = key === "comfy_url" || key === "proxy_url" ? withScheme(form[key]) : form[key].trim();
     if (next !== (value?.[key] ?? "")) changes[key] = next;
   }
   const dirty = Object.keys(changes).length > 0;
@@ -223,7 +230,12 @@ export function SettingsDialog({
             <input
               aria-label="ComfyUI URL"
               aria-describedby="comfy-url-help"
-              type="url"
+              type="text"
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
               required
               disabled={locked || saving}
               value={form.comfy_url}
@@ -264,7 +276,12 @@ export function SettingsDialog({
                   <input
                     aria-label="API proxy URL"
                     aria-describedby="proxy-url-help"
-                    type="url"
+                    type="text"
+                    inputMode="url"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    spellCheck={false}
                     required
                     disabled={locked || saving}
                     value={form.proxy_url}

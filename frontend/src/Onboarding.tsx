@@ -398,7 +398,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
           : <p>This model is no longer listed as missing.</p>}
       </section>}
       {view === "connection" && <section className="connection-options">
-        <form onSubmit={event => {event.preventDefault(); void connect(address);}}><label htmlFor="comfy-address">ComfyUI address</label><input id="comfy-address" type="url" value={address} placeholder="http://127.0.0.1:8188" disabled={connectionBusy} onChange={event => setAddress(event.target.value)}/>
+        <form onSubmit={event => {event.preventDefault(); void connect(address);}}><label htmlFor="comfy-address">ComfyUI address</label><input id="comfy-address" type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false} value={address} placeholder="http://127.0.0.1:8188" disabled={connectionBusy} onChange={event => setAddress(event.target.value)}/>
           <button disabled={connectionBusy || !address.trim()}>Connect</button></form>
         <p>Use the address that opens ComfyUI on this device.</p>
       </section>}
