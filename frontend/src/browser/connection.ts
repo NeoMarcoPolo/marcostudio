@@ -56,14 +56,60 @@ export async function probe(address: string, signal?: AbortSignal, timeout = 400
   return address;
 }
 
+export const DEFAULT_ADDRESSES = ["http://127.0.0.1:8188", "http://127.0.0.1:8000"];
+const CONNECT_FAILED = "Couldn't connect to ComfyUI.";
+
+// Why a connection failed, named only when the browser gives evidence for it:
+// "permission" when local-network access is denied, "cors" when something
+// answers a no-cors request but the readable request fails, else "unreachable".
+// A no-cors answer proves only that some server listens there, so callers name
+// the answering address instead of asserting it is ComfyUI.
+export type ConnectionReason = "permission" | "cors" | "unreachable";
+export class ConnectionFailure extends Error {
+  constructor(readonly reason: ConnectionReason, readonly tried: string[], readonly answered: string[] = []) {
+    super(CONNECT_FAILED);
+    this.name = "ConnectionFailure";
+  }
+}
+
+// Chrome 156 accepts all three names; other browsers throw for unknown names.
+const PERMISSION_NAMES = ["loopback-network", "local-network", "local-network-access"];
+async function localNetworkDenied() {
+  for (const name of PERMISSION_NAMES) {
+    try {
+      if ((await navigator.permissions.query({name} as unknown as PermissionDescriptor)).state === "denied") return true;
+    } catch { /* Unsupported name or no Permissions API. */ }
+  }
+  return false;
+}
+
+async function answersWithoutCors(address: string) {
+  try {
+    await fetch(`${address}/system_stats`, {mode: "no-cors", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(3000)});
+    return true;
+  } catch { return false; }
+}
+
+export async function diagnose(tried: string[]) {
+  if (await localNetworkDenied()) return new ConnectionFailure("permission", tried);
+  const answers = await Promise.all(tried.map(answersWithoutCors));
+  const answered = tried.filter((_, index) => answers[index]);
+  return new ConnectionFailure(answered.length ? "cors" : "unreachable", tried, answered);
+}
+
 export async function discover(address?: string) {
   const saved = endpoint();
-  const candidates = address ? [normalizeAddress(address)] : saved ? [saved]
-    : ["http://127.0.0.1:8188", "http://127.0.0.1:8000"];
+  const candidates = address ? [normalizeAddress(address)] : saved ? [saved] : DEFAULT_ADDRESSES;
   const results = await Promise.allSettled(candidates.map(value => probe(value, undefined, 30000)));
   const found = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
-  if (!found.length) throw new Error("Couldn't connect to ComfyUI.");
-  return found;
+  if (found.length) return found;
+  // One chosen address that answered as something other than ComfyUI has a
+  // more useful message than a network diagnosis. Default ports are skipped:
+  // an unrelated server on port 8000 must not hide a stopped ComfyUI on 8188.
+  const [only] = results;
+  if (candidates.length === 1 && only.status === "rejected" && only.reason instanceof Error
+    && only.reason.message !== CONNECT_FAILED) throw only.reason;
+  throw await diagnose(candidates);
 }
 
 export function selectConnection(address: string) {

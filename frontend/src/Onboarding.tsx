@@ -3,7 +3,7 @@ import { Check, ExternalLink, X } from "lucide-react";
 import type { Doctor, Feature, FeatureId } from "./api";
 import { getFeature } from "./browser/catalog";
 import { CONNECTION_DRAFT_KEY, discover, endpoint, normalizeAddress, selectConnection } from "./browser/connection";
-import { ConnectionHelp } from "./ConnectionHelp";
+import { ConnectionHelp, type FailureDetail } from "./ConnectionHelp";
 import { canInstall, installTasks, managerAvailable, reconcileInstalls, resumeDownloads, startDownloads, type InstallTask } from "./browser/manager";
 import type { Requirements } from "./browser/requirements";
 import { checkStorage, spaceGroups, supportsIntegrityVerification, supportsStoragePairing, type SpaceReport } from "./browser/modelSpace";
@@ -97,6 +97,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
   const [candidates, setCandidates] = useState<string[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
+  const [failure, setFailure] = useState<FailureDetail | null>(null);
   const [manager, setManager] = useState(false);
   const [spaceSupported, setSpaceSupported] = useState(false);
   const [integritySupported, setIntegritySupported] = useState(false);
@@ -231,11 +232,14 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
       }
       const found = await discover(target);
       if (!current.current) return;
+      setFailure(null);
       if (found.length === 1) await choose(found[0], automatic);
       else { setConnectionHelp(false); setCandidates(found); }
     } catch (error) {
       if (current.current) {
         setError(error instanceof Error ? error.message : "Couldn't connect to ComfyUI.");
+        // Duck-typed so test doubles of the connection module need not export the class.
+        setFailure(error instanceof Error && "reason" in error && "tried" in error ? error as unknown as FailureDetail : null);
         setConnectionHelp(true); setView("setup");
       }
     } finally { connectionPending.current = false; if (current.current) setConnecting(false); }
@@ -296,7 +300,7 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
     <div className="setup-panel">
       {view !== "setup" && <button className="setup-back" onClick={() => setView("setup")}>← Back to setup</button>}
       {view === "setup" && step === 0 && <>
-        {connectionHelp ? <ConnectionHelp address={localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || "http://127.0.0.1:8188"} error={error}
+        {connectionHelp ? <ConnectionHelp key={failure?.reason ?? "none"} failure={failure} address={localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || "http://127.0.0.1:8188"} error={error}
           busy={connectionBusy} retry={() => void connect(address)}/> : candidates.length > 1 ?
           <div className="instance-choices"><p>Choose your ComfyUI</p>{candidates.map(value => <button key={value} disabled={connectionBusy} onClick={() => void choose(value).catch(error => setError(String(error)))}>{value}</button>)}</div> : <>
             <p>Start ComfyUI on this computer, then connect.</p>
