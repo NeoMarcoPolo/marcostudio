@@ -59,3 +59,14 @@ it("links to the ComfyUI installer from the Connect step", () => {
     refresh={vi.fn(async () => {})} connected={vi.fn(async () => {})} close={vi.fn()}/>);
   expect(screen.getByRole("link", {name: /Install it/})).toHaveAttribute("href", "https://comfy.org/download");
 });
+
+// mp-marcostudio-qa#7: explain how another device reaches ComfyUI.
+it("explains --listen and the page origin for another device", async () => {
+  const user = userEvent.setup();
+  render(<Onboarding featureId="relight" doctor={report} checking={false} locked={false}
+    refresh={vi.fn(async () => {})} connected={vi.fn(async () => {})} close={vi.fn()}/>);
+  await user.click(screen.getAllByRole("button", {name: "Change address"})[0]);
+  await user.click(screen.getByText("On a phone or another computer"));
+  expect(screen.getByText(`--listen 0.0.0.0 --enable-cors-header ${location.origin}`)).toBeVisible();
+  expect(screen.getByText(/not been verified on phones/)).toBeVisible();
+});

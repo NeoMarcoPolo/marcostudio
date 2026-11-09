@@ -405,6 +405,11 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
         <form onSubmit={event => {event.preventDefault(); void connect(address);}}><label htmlFor="comfy-address">ComfyUI address</label><input id="comfy-address" type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false} value={address} placeholder="http://127.0.0.1:8188" disabled={connectionBusy} onChange={event => setAddress(event.target.value)}/>
           <button disabled={connectionBusy || !address.trim()}>Connect</button></form>
         <p>Use the address that opens ComfyUI on this device.</p>
+        <details className="other-device-help"><summary>On a phone or another computer</summary>
+          <p>Start ComfyUI on its computer with <code>--listen 0.0.0.0 --enable-cors-header {location.origin}</code>. This lets other devices on your network use that ComfyUI, so do it only on a network you trust.</p>
+          <p>Then enter that computer’s network address here, for example <code>http://192.168.1.20:8188</code>.</p>
+          <p>Some phone browsers block this page from reaching a local-network address. This setup has not been verified on phones.</p>
+        </details>
       </section>}
     </div>
     {error && !connectionHelp && <div className="setup-error" role="alert"><p>{error}</p></div>}
