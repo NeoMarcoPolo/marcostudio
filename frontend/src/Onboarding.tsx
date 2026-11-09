@@ -364,7 +364,8 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
                 <button className="model-details-button" aria-label={`Details for ${model.filename}`} onClick={() => setView(model.url)}>Details</button>
               </div>
               {queued && <span className="model-state">Already queued</span>}
-              {!queued && !eligible && <span className="model-state">{pendingDownloads ? "Available after the current download finishes" : manager ? "Manual download required" : "Enable ComfyUI-Manager for automatic downloads, or download manually"}</span>}
+              {!queued && model.actualSize !== undefined && <span className="model-state">Incomplete file: {formatSize(model.actualSize)} of {formatSize(model.size)}. Delete it from ComfyUI’s models folder, then download it again.</span>}
+              {!queued && !eligible && model.actualSize === undefined && <span className="model-state">{pendingDownloads ? "Available after the current download finishes" : manager ? "Manual download required" : "Enable ComfyUI-Manager for automatic downloads, or download manually"}</span>}
             </li>;
           })}</ul>
           {!pendingDownloads && manager && toInstall.length > 0 && <>

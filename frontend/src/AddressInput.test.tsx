@@ -70,3 +70,14 @@ it("explains --listen and the page origin for another device", async () => {
   expect(screen.getByText(`--listen 0.0.0.0 --enable-cors-header ${location.origin}`)).toBeVisible();
   expect(screen.getByText(/not been verified on phones/)).toBeVisible();
 });
+
+// mp-marcostudio-qa#9: an incomplete file is shown with the action to take.
+it("shows an incomplete model file and how to fix it", () => {
+  const incomplete = {key: "vae", filename: "model.safetensors", category: "vae", url: "https://example.com/m", size: 2.5e9,
+    sha256: "", repository: "a/b", loader: "", field: "", available: false, installable: false, actualSize: 0};
+  render(<Onboarding featureId="relight" doctor={{...report, model_requirements: [incomplete],
+    checks: [{name: "size:vae", status: "fail", message: "incomplete"}]} as unknown as Doctor} checking={false} locked={false}
+    refresh={vi.fn(async () => {})} connected={vi.fn(async () => {})} close={vi.fn()}/>);
+  expect(screen.getByText(/Incomplete file: 0.0 GB of 2.5 GB/)).toBeInTheDocument();
+  expect(screen.queryByText("Manual download required")).toBeNull();
+});

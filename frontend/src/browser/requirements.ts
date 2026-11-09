@@ -10,7 +10,7 @@ type Definition = {input?: {required?: Record<string, Spec>; optional?: Record<s
 export interface Requirements extends Doctor {
   connected: boolean;
   address: string;
-  model_requirements: (Model & {available: boolean; resolved?: string; installable: boolean})[];
+  model_requirements: (Model & {available: boolean; resolved?: string; installable: boolean; actualSize?: number})[];
   missing_nodes: string[];
   models: Record<string, string>;
 }
@@ -38,6 +38,32 @@ async function checkManagerQueue(address: string, signal?: AbortSignal): Promise
     return "unknown";
   }
 }
+
+// ComfyUI (v0.3.49+, PR #8792) lists model files with their byte sizes at
+// /experiment/models/{folder}. A file under its expected name but with another
+// size is incomplete, so readiness must not count it. Any failure to read the
+// listing keeps the name-only check. Its listing cache never hits today (it
+// compares a float with a dict), so sizes are current; if upstream fixes that
+// cache, a size could lag a file that is still being written.
+async function modelSizes(address: string, folder: string, signal?: AbortSignal) {
+  try {
+    const entries = await request<unknown>(address, `/experiment/models/${encodeURIComponent(folder)}`, {signal}, 5000);
+    if (!Array.isArray(entries)) return undefined;
+    const sizes = new Map<string, {size: number; pathIndex: number}>();
+    for (const entry of entries) {
+      if (typeof entry?.name !== "string" || !Number.isInteger(entry?.size) || !Number.isInteger(entry?.pathIndex)) continue;
+      const name = entry.name.replaceAll("\\", "/"), known = sizes.get(name);
+      // ComfyUI loads the first model root that holds a name.
+      if (!known || entry.pathIndex < known.pathIndex) sizes.set(name, {size: entry.size, pathIndex: entry.pathIndex});
+    }
+    return new Map([...sizes].map(([name, value]) => [name, value.size]));
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return undefined;
+  }
+}
+
+const gigabytes = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
 function validateNode(node: Graph[string], definition: Definition, models: Model[]) {
   const fields = {...definition.input?.required, ...definition.input?.optional};
@@ -166,6 +192,16 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
     result.checks.push({name: "download:" + model.key, status: "fail", message: task.state === "failed"
       ? "Download failed. Remove the incomplete model in ComfyUI before retrying."
       : "Waiting for ComfyUI to confirm the download finished."});
+  }
+  const folders = [...new Set(result.model_requirements.filter(model => model.available).map(model => model.category))];
+  const listings = new Map(await Promise.all(folders.map(async folder => [folder, await modelSizes(address, folder, signal)] as const)));
+  for (const model of result.model_requirements) {
+    if (!model.available || !model.resolved) continue;
+    const actual = listings.get(model.category)?.get(model.resolved.replaceAll("\\", "/"));
+    if (actual === undefined || actual === model.size) continue;
+    model.available = false; model.installable = false; model.actualSize = actual;
+    delete result.models[model.key];
+    result.checks.push({name: `size:${model.key}`, status: "fail", message: `${model.filename} is incomplete: ${gigabytes(actual)} of ${gigabytes(model.size)}. Delete it from ComfyUI's models folder, then download it again.`});
   }
   const present = result.model_requirements.filter(model => model.available);
   const states = await integrityStates(address, present, signal);
