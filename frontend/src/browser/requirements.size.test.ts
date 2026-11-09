@@ -68,3 +68,20 @@ it("matches Windows paths and uses the first model root that holds the name", as
   expect(result.ready).toBe(false);
   expect(result.model_requirements[0].actualSize).toBe(12);
 });
+
+it("does not judge sizes while the Manager queue is busy", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/v2/manager/queue/status")
+    ? new Response(JSON.stringify({pending_count: 0, in_progress_count: 1, is_processing: true})) : new Response("", {status: 404})));
+  listing = [{name: "model.safetensors", pathIndex: 0, size: 0}];
+  const result = await checkRequirements("relight", "flash");
+  expect(result.ready).toBe(false);
+  expect(result.model_requirements[0].actualSize).toBeUndefined();
+  expect(result.checks.some(check => check.name.startsWith("size:"))).toBe(false);
+});
+
+it("names a larger file as a size mismatch, not an incomplete download", async () => {
+  listing = [{name: "model.safetensors", pathIndex: 0, size: model.size + 1}];
+  const result = await checkRequirements("relight", "flash");
+  expect(result.ready).toBe(false);
+  expect(result.checks.find(check => check.name === "size:vae")?.message).toMatch(/not the expected .* another version/);
+});

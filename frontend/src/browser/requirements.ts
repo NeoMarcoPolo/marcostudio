@@ -193,7 +193,10 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
       ? "Download failed. Remove the incomplete model in ComfyUI before retrying."
       : "Waiting for ComfyUI to confirm the download finished."});
   }
-  const folders = [...new Set(result.model_requirements.filter(model => model.available).map(model => model.category))];
+  // A busy queue already blocks readiness, and a file being written by
+  // another browser's download must not be reported as one to delete.
+  const settled = queue === "idle" || queue === "unsupported";
+  const folders = settled ? [...new Set(result.model_requirements.filter(model => model.available).map(model => model.category))] : [];
   const listings = new Map(await Promise.all(folders.map(async folder => [folder, await modelSizes(address, folder, signal)] as const)));
   for (const model of result.model_requirements) {
     if (!model.available || !model.resolved) continue;
@@ -201,7 +204,9 @@ export async function checkRequirements(id: FeatureId, mode: string, signal?: Ab
     if (actual === undefined || actual === model.size) continue;
     model.available = false; model.installable = false; model.actualSize = actual;
     delete result.models[model.key];
-    result.checks.push({name: `size:${model.key}`, status: "fail", message: `${model.filename} is incomplete: ${gigabytes(actual)} of ${gigabytes(model.size)}. Delete it from ComfyUI's models folder, then download it again.`});
+    result.checks.push({name: `size:${model.key}`, status: "fail", message: actual < model.size
+      ? `${model.filename} is incomplete: ${gigabytes(actual)} of ${gigabytes(model.size)}. Delete it from ComfyUI's models folder, then download it again.`
+      : `${model.filename} is ${gigabytes(actual)}, not the expected ${gigabytes(model.size)}. It may be another version. Replace it with the listed file.`});
   }
   const present = result.model_requirements.filter(model => model.available);
   const states = await integrityStates(address, present, signal);

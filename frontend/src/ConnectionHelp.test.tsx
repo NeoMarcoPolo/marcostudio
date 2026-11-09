@@ -40,3 +40,12 @@ it("lists the addresses tried, links to the installer, and offers another addres
   await user.click(screen.getByRole("button", {name: "Connect"}));
   expect(connectTo).toHaveBeenCalledWith("127.0.0.1:8192");
 });
+
+it("lets the user leave the CORS fix when the answering server is not ComfyUI", async () => {
+  const {default: userEvent} = await import("@testing-library/user-event");
+  const user = userEvent.setup();
+  show({reason: "cors", tried: ["http://127.0.0.1:8188", "http://127.0.0.1:8000"], answered: ["http://127.0.0.1:8000"]});
+  expect(screen.getByRole("link", {name: /Install it/})).toHaveAttribute("href", "https://comfy.org/download");
+  await user.click(screen.getByRole("button", {name: "That isn’t ComfyUI"}));
+  expect(screen.getByText(/Start ComfyUI, then try again./)).toBeInTheDocument();
+});

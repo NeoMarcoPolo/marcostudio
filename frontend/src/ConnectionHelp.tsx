@@ -49,10 +49,12 @@ export function ConnectionHelp({address, error, failure, busy, retry, connectTo}
   </section>;
 
   return <section className="connection-help">
-    {failure?.reason === "cors" ? <>
+    {failure?.reason !== "cors" && <button autoFocus className="setup-link setup-back" onClick={() => setShowFix(false)}><ArrowLeft size={14}/> Back</button>}
+    {failure?.reason === "cors" && <>
       <p className="failure-text" role="alert">Something is running at {failure.answered.join(" and ")}, but it doesn’t let this page connect.</p>
-      <p>If that is ComfyUI, add one startup option so it allows this page.</p>
-    </> : <button autoFocus className="setup-link setup-back" onClick={() => setShowFix(false)}><ArrowLeft size={14}/> Back</button>}
+      <p>If that is ComfyUI, add one startup option so it allows this page. <a href={INSTALL_URL} target="_blank" rel="noopener noreferrer">Don’t have ComfyUI? Install it <ExternalLink size={13}/></a></p>
+      <button className="setup-link" onClick={() => setShowFix(false)}>That isn’t ComfyUI</button>
+    </>}
     <fieldset className="launcher-picker">
       <legend>How do you start ComfyUI?</legend>
       <div>{(["Desktop", "Portable", "Terminal"] as const).map(value =>
