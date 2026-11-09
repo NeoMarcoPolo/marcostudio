@@ -3,7 +3,7 @@ import { Check, ExternalLink, X } from "lucide-react";
 import type { Doctor, Feature, FeatureId } from "./api";
 import { getFeature } from "./browser/catalog";
 import { CONNECTION_DRAFT_KEY, discover, endpoint, normalizeAddress, selectConnection } from "./browser/connection";
-import { ConnectionHelp, type FailureDetail } from "./ConnectionHelp";
+import { ConnectionHelp, INSTALL_URL, type FailureDetail } from "./ConnectionHelp";
 import { canInstall, installTasks, managerAvailable, reconcileInstalls, resumeDownloads, startDownloads, type InstallTask } from "./browser/manager";
 import type { Requirements } from "./browser/requirements";
 import { checkStorage, spaceGroups, supportsIntegrityVerification, supportsStoragePairing, type SpaceReport } from "./browser/modelSpace";
@@ -301,9 +301,9 @@ export function Onboarding({feature, featureId, doctor, checking, locked, refres
       {view !== "setup" && <button className="setup-back" onClick={() => setView("setup")}>← Back to setup</button>}
       {view === "setup" && step === 0 && <>
         {connectionHelp ? <ConnectionHelp key={failure?.reason ?? "none"} failure={failure} address={localStorage.getItem(CONNECTION_DRAFT_KEY) || endpoint() || "http://127.0.0.1:8188"} error={error}
-          busy={connectionBusy} retry={() => void connect(address)}/> : candidates.length > 1 ?
+          busy={connectionBusy} retry={() => void connect(address)} connectTo={value => void connect(value)}/> : candidates.length > 1 ?
           <div className="instance-choices"><p>Choose your ComfyUI</p>{candidates.map(value => <button key={value} disabled={connectionBusy} onClick={() => void choose(value).catch(error => setError(String(error)))}>{value}</button>)}</div> : <>
-            <p>Start ComfyUI on this computer, then connect.</p>
+            <p>Start ComfyUI on this computer, then connect. <a href={INSTALL_URL} target="_blank" rel="noopener noreferrer">Don’t have ComfyUI? Install it <ExternalLink size={13}/></a></p>
             <button className="setup-primary" disabled={connectionBusy} onClick={() => void connect(address)}>{connecting ? "Connecting…" : "Connect"}</button>
           </>}
       </>}

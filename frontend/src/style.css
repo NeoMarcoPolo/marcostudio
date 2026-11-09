@@ -460,7 +460,8 @@ select option { color: var(--text); background: #242629; }
 .launch-option button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .launcher-fix > .setup-primary { margin-top: 8px; }
 .connection-help .inline-code { font-family: monospace; overflow-wrap: anywhere; }
-.onboarding .connection-options { margin-top: 18px; }
+.onboarding .connection-options, .connection-help .connection-other { margin-top: 18px; }
+.connection-help p { overflow-wrap: anywhere; }
 .requirement-details ul { padding: 0; list-style: none; }
 .requirement-details li { margin: 12px 0; overflow-wrap: anywhere; }
 .requirement-details li span { display: block; font-size: 11px; margin: 4px 0; }

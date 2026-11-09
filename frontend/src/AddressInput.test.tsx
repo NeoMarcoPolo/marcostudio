@@ -53,3 +53,9 @@ it("saves a host and port without a scheme as an http address in settings", asyn
   await user.click(screen.getByRole("button", {name: "Save and check"}));
   expect(save).toHaveBeenCalledWith({comfy_url: "http://127.0.0.1:8192"});
 });
+
+it("links to the ComfyUI installer from the Connect step", () => {
+  render(<Onboarding featureId="relight" doctor={{...report, connected: false} as Doctor} checking={false} locked={false}
+    refresh={vi.fn(async () => {})} connected={vi.fn(async () => {})} close={vi.fn()}/>);
+  expect(screen.getByRole("link", {name: /Install it/})).toHaveAttribute("href", "https://comfy.org/download");
+});

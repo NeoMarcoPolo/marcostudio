@@ -4,9 +4,13 @@ import type { ConnectionFailure } from "./browser/connection";
 
 export type FailureDetail = Pick<ConnectionFailure, "reason" | "tried" | "answered">;
 
-export function ConnectionHelp({address, error, failure, busy, retry}: {
+export const INSTALL_URL = "https://comfy.org/download";
+
+export function ConnectionHelp({address, error, failure, busy, retry, connectTo}: {
   address: string; error: string; failure?: FailureDetail | null; busy: boolean; retry: () => void;
+  connectTo?: (address: string) => void;
 }) {
+  const [custom, setCustom] = useState("");
   const option = `--enable-cors-header ${location.origin}`;
   const [showFix, setShowFix] = useState(failure?.reason === "cors");
   const [launcher, setLauncher] = useState<"Desktop" | "Portable" | "Terminal">();
@@ -29,11 +33,18 @@ export function ConnectionHelp({address, error, failure, busy, retry}: {
 
   if (!showFix) return <section className="connection-help">
     <p className="failure-text" role="alert">{error && !failure && error !== "Couldn't connect to ComfyUI." ? error : "Can’t reach ComfyUI."}</p>
-    <p>Start ComfyUI, then try again.</p>
+    {failure?.tried.length ? <p>Tried {failure.tried.join(" and ")}.</p> : null}
+    <p>Start ComfyUI, then try again. <a href={INSTALL_URL} target="_blank" rel="noopener noreferrer">Don’t have ComfyUI? Install it <ExternalLink size={13}/></a></p>
     <div className="setup-actions">
       <button autoFocus className="setup-primary" disabled={busy} onClick={retry}>{busy ? "Connecting…" : "Try again"}</button>
       <a href={address} target="_blank" rel="noopener noreferrer">Open ComfyUI <ExternalLink size={13}/></a>
     </div>
+    {connectTo && failure?.reason === "unreachable" && <form className="connection-other" onSubmit={event => {event.preventDefault(); if (custom.trim()) connectTo(custom.trim());}}>
+      <label htmlFor="comfy-address-other">ComfyUI uses another address?</label>
+      <input id="comfy-address-other" type="text" inputMode="url" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false}
+        placeholder="127.0.0.1:8188" value={custom} disabled={busy} onChange={event => setCustom(event.target.value)}/>
+      <button disabled={busy || !custom.trim()}>Connect</button>
+    </form>}
     <button className="setup-link" onClick={() => setShowFix(true)}>It's already running</button>
   </section>;
 
