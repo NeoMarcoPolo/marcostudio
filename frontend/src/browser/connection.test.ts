@@ -38,3 +38,36 @@ it("keeps the supplied timeout active in the metadata probe", async () => {
   await expect(runtimeInfo(address, undefined, 1)).rejects.toThrow("Couldn't connect to ComfyUI.");
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+// mp-marcostudio-qa#4: name the cause of a failed connection only with evidence.
+const stubPermission = (state: string | null) => vi.stubGlobal("navigator", {permissions: {query: vi.fn(async ({name}: {name: string}) => {
+  if (state === null || name !== "loopback-network") throw new TypeError("unsupported");
+  return {state};
+})}});
+const noCorsAnswers = (answering: string[]) => vi.fn(async (input: string, init?: RequestInit) => {
+  if (init?.mode === "no-cors" && answering.some(value => input.startsWith(value))) return new Response(null);
+  throw new TypeError("Failed to fetch");
+});
+it("reports a denied local-network permission before probing", async () => {
+  stubPermission("denied");
+  const fetcher = noCorsAnswers([address]); vi.stubGlobal("fetch", fetcher);
+  await expect(discover(address)).rejects.toMatchObject({reason: "permission", tried: [address]});
+  expect(fetcher.mock.calls.some(([, init]) => init?.mode === "no-cors")).toBe(false);
+});
+it("reports a CORS block when the address answers only a no-cors request", async () => {
+  stubPermission("granted"); vi.stubGlobal("fetch", noCorsAnswers([address]));
+  await expect(discover(address)).rejects.toMatchObject({reason: "cors", answered: [address]});
+});
+it("reports unreachable when nothing answers and the permission state is unknown", async () => {
+  stubPermission(null); vi.stubGlobal("fetch", noCorsAnswers([]));
+  await expect(discover()).rejects.toMatchObject({reason: "unreachable", tried: ["http://127.0.0.1:8188", "http://127.0.0.1:8000"], answered: []});
+});
+it("names only the default port that answered", async () => {
+  stubPermission(null); vi.stubGlobal("fetch", noCorsAnswers(["http://127.0.0.1:8000"]));
+  await expect(discover()).rejects.toMatchObject({reason: "cors", answered: ["http://127.0.0.1:8000"]});
+});
+it("keeps a chosen address's own error when it answers as something else", async () => {
+  stubPermission(null);
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({hello: "world"}), {status: 200})));
+  await expect(discover(address)).rejects.toThrow("This address didn't respond as ComfyUI.");
+});

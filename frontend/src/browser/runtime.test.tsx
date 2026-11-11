@@ -43,7 +43,7 @@ let runtimeDevices: unknown[] | undefined;
 let managerQueue: "idle" | "active" | "unknown" = "idle";
 let pending: unknown[][], history: Record<string, unknown>, taskHistory: Record<string, unknown>;
 let batchOperations: unknown[];
-let calls: {path: string; method: string; body: any}[];
+let calls: {path: string; method: string; body: any; mode?: RequestMode}[];
 
 // A small native API fixture. Generation/history and Manager responses use their
 // upstream wire formats; no MarcoStudio server routes are served by this fake.
@@ -83,7 +83,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname, method = init?.method ?? "GET", body = init?.body instanceof FormData ? init.body : init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({path, method, body});
+    calls.push({path, method, body, mode: init?.mode});
     if (url.port === "8000" || !available) throw new TypeError("Failed to fetch");
     if (path === "/system_stats") return json({system: {comfyui_version: "0.43.0", pytorch_version: torchVersion}, devices: runtimeDevices ?? [{type: runtimeDevice}]});
     if (path === "/marcostudio/capabilities") return json({error: "Not found"}, 404);
@@ -154,7 +154,7 @@ describe("direct ComfyUI onboarding", () => {
     selectConnection("http://127.0.0.1:9000"); available = false;
     await expect(discover()).rejects.toThrow("Couldn't connect");
     expect(localStorage.getItem(CONNECTION_KEY)).toBe("http://127.0.0.1:9000");
-    expect(calls.filter(call => call.path === "/system_stats")).toHaveLength(1);
+    expect(calls.filter(call => call.path === "/system_stats" && call.mode !== "no-cors")).toHaveLength(1);
     render(<App/>);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).queryByText("Connect to check")).not.toBeInTheDocument();
